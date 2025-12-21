@@ -25,10 +25,22 @@ fn main() {
     let n_atoms = simulation.get_natoms();
     println!("{}", n_atoms);
 
-    let coords = simulation.extract_atom("x") as *const *const [f64; 3];
     unsafe {
-        for &atom_coords in slice::from_raw_parts(coords, n_atoms).into_iter() {
-            println!("{:?}", *atom_coords);
+        let positions = slice::from_raw_parts(
+            simulation.extract_atom("x") as *const *const [f64; 3],
+            n_atoms,
+        );
+        let velocities = slice::from_raw_parts(
+            simulation.extract_atom("v") as *const *const [f64; 3],
+            n_atoms,
+        );
+        let atom_types =
+            slice::from_raw_parts(simulation.extract_atom("type") as *const i32, n_atoms);
+
+        for i in 0..n_atoms {
+            println!("{}", atom_types[i]);
+            println!("{:?}", *positions[i]);
+            println!("{:?}", *velocities[i]);
         }
     }
 }
