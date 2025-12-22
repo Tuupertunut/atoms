@@ -22,6 +22,8 @@ fn main() {
     simulation.command("timestep 0.001");
     simulation.command("run 1000");
 
+    let box_corners = simulation.extract_box();
+    println!("{:?}", box_corners);
     let n_atoms = simulation.get_natoms();
     println!("{}", n_atoms);
 

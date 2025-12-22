@@ -35,6 +35,23 @@ impl Lammps {
             lammps_extract_atom(self.session, CString::new(property).unwrap().as_ptr())
         };
     }
+
+    pub fn extract_box(&self) -> ([f64; 3], [f64; 3]) {
+        let mut box_bounds = ([0.; 3], [0.; 3]);
+        unsafe {
+            lammps_extract_box(
+                self.session,
+                &mut box_bounds.0 as *mut f64,
+                &mut box_bounds.1 as *mut f64,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
+        };
+        return box_bounds;
+    }
 }
 
 impl Drop for Lammps {
