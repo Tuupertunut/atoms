@@ -37,9 +37,6 @@ fn main() {
                 .to_str()
                 .unwrap(),
         )
-        // Tell cargo to invalidate the built crate whenever any of the
-        // included header files changed.
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         // Finish the builder and generate the bindings.
         .generate()
         // Unwrap the Result and panic on failure.
@@ -50,4 +47,8 @@ fn main() {
     bindings
         .write_to_file(out_dir.join("bindings.rs"))
         .expect("Couldn't write bindings!");
+
+    // Tell cargo to invalidate the built crate whenever the dependency lammps
+    // package changes
+    println!("cargo::rerun-if-changed=lammps");
 }
