@@ -1,9 +1,15 @@
+use kiss3d::{
+    light::Light,
+    nalgebra::{self, Point3, Translation3},
+    window::Window,
+};
 use lammps::Lammps;
-use std::slice;
+use std::{iter, slice};
 
 mod lammps;
 
-fn main() {
+#[kiss3d::main]
+async fn main() {
     println!("Hello, world!");
     let mut simulation = Lammps::open();
 
@@ -43,6 +49,42 @@ fn main() {
             println!("{}", atom_types[i]);
             println!("{:?}", *positions[i]);
             println!("{:?}", *velocities[i]);
+        }
+    }
+
+    let mut window = Window::new_with_size("Atoms", 1000, 800);
+    window.set_light(Light::StickToCamera);
+
+    let mut box_cuboid = window.add_cube(0., 0., 0.);
+    box_cuboid.set_surface_rendering_activation(false);
+    box_cuboid.set_lines_width(1.);
+
+    let mut atom_spheres = iter::repeat_with(|| window.add_sphere(1.))
+        .take(n_atoms)
+        .collect::<Vec<_>>();
+
+    while window.render().await {
+        let (box_low, box_high) = simulation.extract_box();
+        let (box_low, box_high) = (Point3::from(box_low), Point3::from(box_high));
+
+        let scale = (box_high - box_low).cast::<f32>();
+        box_cuboid.set_local_scale(scale.x, scale.y, scale.z);
+
+        box_cuboid.set_local_translation(
+            Translation3::from(nalgebra::center(&box_low, &box_high)).cast::<f32>(),
+        );
+
+        let positions = unsafe {
+            slice::from_raw_parts(
+                simulation.extract_atom("x") as *const *const [f64; 3],
+                n_atoms,
+            )
+            .iter()
+            .map(|&ptr| *ptr)
+        };
+
+        for (atom_sphere, atom_pos) in atom_spheres.iter_mut().zip(positions) {
+            atom_sphere.set_local_translation(Translation3::from(atom_pos).cast::<f32>());
         }
     }
 }

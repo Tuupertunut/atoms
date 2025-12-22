@@ -30,7 +30,7 @@ impl Lammps {
         return unsafe { lammps_get_natoms(self.session) } as usize;
     }
 
-    pub fn extract_atom(&self, property: &str) -> *mut c_void {
+    pub fn extract_atom(&self, property: &str) -> *const c_void {
         return unsafe {
             lammps_extract_atom(self.session, CString::new(property).unwrap().as_ptr())
         };
