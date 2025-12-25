@@ -26,7 +26,6 @@ async fn main() {
     simulation.command("pair_coeff 1 1 0.01 3.3");
     simulation.command("fix 1 all nve");
     simulation.command("timestep 0.001");
-    simulation.command("run 1000");
 
     let box_corners = simulation.extract_box();
     println!("{:?}", box_corners);
@@ -64,6 +63,8 @@ async fn main() {
         .collect::<Vec<_>>();
 
     while window.render().await {
+        simulation.command("run 50");
+
         let (box_low, box_high) = simulation.extract_box();
         let (box_low, box_high) = (Point3::from(box_low), Point3::from(box_high));
 
