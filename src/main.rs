@@ -1,4 +1,5 @@
 use kiss3d::{
+    camera::ArcBall,
     light::Light,
     nalgebra::{self, Point3, Translation3},
     window::Window,
@@ -54,6 +55,8 @@ async fn main() {
     let mut window = Window::new_with_size("Atoms", 1000, 800);
     window.set_light(Light::StickToCamera);
 
+    let mut camera = ArcBall::new(Point3::new(10., 10., -20.), Point3::new(10., 10., 10.));
+
     let mut box_cuboid = window.add_cube(0., 0., 0.);
     box_cuboid.set_surface_rendering_activation(false);
     box_cuboid.set_lines_width(1.);
@@ -62,7 +65,7 @@ async fn main() {
         .take(n_atoms)
         .collect::<Vec<_>>();
 
-    while window.render().await {
+    while window.render_with_camera(&mut camera).await {
         simulation.command("run 50");
 
         let (box_low, box_high) = simulation.extract_box();
