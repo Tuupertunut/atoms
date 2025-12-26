@@ -5,7 +5,7 @@ use std::{
 };
 
 /// Lammps C API bindings generated from library.h
-mod lammps_sys {
+pub mod lammps_sys {
     #![allow(nonstandard_style, dead_code)]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
