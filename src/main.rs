@@ -1,8 +1,8 @@
 use kiss3d::{
-    camera::ArcBall,
+    camera::{ArcBall, Camera},
     event::{Action, MouseButton, WindowEvent},
     light::Light,
-    nalgebra::{self, Point3, Translation3},
+    nalgebra::{self, Point2, Point3, Translation3},
     window::Window,
 };
 use lammps::Lammps;
@@ -35,6 +35,7 @@ async fn main() {
     window.set_light(Light::StickToCamera);
 
     let mut camera = ArcBall::new(Point3::new(10., 10., -20.), Point3::new(10., 10., 10.));
+    camera.set_dist_step(0.99);
 
     let mut box_cuboid = window.add_cube(0., 0., 0.);
     box_cuboid.set_surface_rendering_activation(false);
@@ -44,30 +45,42 @@ async fn main() {
         .take(n_atoms)
         .collect::<Vec<_>>();
 
-    let mut atom_template_sphere = window.add_sphere(1.);
-    atom_template_sphere.set_surface_rendering_activation(false);
-    atom_template_sphere.set_lines_width(0.5);
-    atom_template_sphere.set_visible(false);
+    let mut template_sphere = window.add_sphere(1.);
+    template_sphere.set_surface_rendering_activation(false);
+    template_sphere.set_lines_width(0.5);
+    template_sphere.set_visible(false);
+
+    let mut template_distance = 30.;
+
+    let mut last_button1_pressed_pos = Point2::origin();
+    let mut button1_pressed_without_dragging = false;
+    let mut last_button2_pressed_pos = Point2::origin();
+    let mut button2_pressed_without_dragging = false;
 
     while window.render_with_camera(&mut camera).await {
         simulation.command("run 50");
 
-        for event in window.events().iter() {
+        for mut event in window.events().iter() {
             match event.value {
                 WindowEvent::MouseButton(MouseButton::Button1, Action::Press, _) => {
-                    if atom_template_sphere.is_visible() {
-                        atom_template_sphere.set_visible(false);
-                    }
+                    let cursor_pos = window.cursor_pos().unwrap();
+                    last_button1_pressed_pos = Point2::new(cursor_pos.0, cursor_pos.1);
+                    button1_pressed_without_dragging = true;
                 }
-                WindowEvent::MouseButton(MouseButton::Button2, Action::Press, _) => {
-                    if atom_template_sphere.is_visible() {
+                WindowEvent::MouseButton(MouseButton::Button1, Action::Release, _) => {
+                    if template_sphere.is_visible() && button1_pressed_without_dragging {
+                        let template_pos = template_sphere
+                            .data()
+                            .local_translation()
+                            .cast::<f64>()
+                            .vector;
                         unsafe {
                             lammps::lammps_sys::lammps_create_atoms(
                                 simulation.session,
                                 1,
                                 std::ptr::null(),
                                 &1,
-                                &[8., 8., 8.] as *const f64,
+                                template_pos.as_ptr(),
                                 &[0., 0., 0.] as *const f64,
                                 std::ptr::null(),
                                 0,
@@ -76,9 +89,40 @@ async fn main() {
                         atom_spheres.push(window.add_sphere(1.));
                         n_atoms += 1;
 
-                        atom_template_sphere.set_visible(false);
-                    } else {
-                        atom_template_sphere.set_visible(true);
+                        template_sphere.set_visible(false);
+                    }
+                    button1_pressed_without_dragging = false;
+                }
+                WindowEvent::MouseButton(MouseButton::Button2, Action::Press, _) => {
+                    let cursor_pos = window.cursor_pos().unwrap();
+                    last_button2_pressed_pos = Point2::new(cursor_pos.0, cursor_pos.1);
+                    button2_pressed_without_dragging = true;
+                }
+                WindowEvent::MouseButton(MouseButton::Button2, Action::Release, _) => {
+                    if button2_pressed_without_dragging {
+                        template_sphere.set_visible(!template_sphere.is_visible());
+                    }
+                    button2_pressed_without_dragging = false;
+                }
+                WindowEvent::CursorPos(cursor_x, cursor_y, _) => {
+                    let moved_pos = Point2::new(cursor_x, cursor_y);
+                    if button1_pressed_without_dragging
+                        && nalgebra::distance_squared(&last_button1_pressed_pos, &moved_pos)
+                            >= f64::powi(10., 2)
+                    {
+                        button1_pressed_without_dragging = false;
+                    }
+                    if button2_pressed_without_dragging
+                        && nalgebra::distance_squared(&last_button2_pressed_pos, &moved_pos)
+                            >= f64::powi(10., 2)
+                    {
+                        button2_pressed_without_dragging = false;
+                    }
+                }
+                WindowEvent::Scroll(_, y_offset, _) => {
+                    if template_sphere.is_visible() {
+                        event.inhibited = true;
+                        template_distance *= f32::powf(1.01, y_offset as f32);
                     }
                 }
                 _ => {}
@@ -108,7 +152,13 @@ async fn main() {
             atom_sphere.set_local_translation(Translation3::from(atom_pos).cast::<f32>());
         }
 
-        let template_pos = [8., 8., 8.];
-        atom_template_sphere.set_local_translation(Translation3::from(template_pos).cast::<f32>());
+        if let Some(cursor_pos) = window.cursor_pos() {
+            let (origin, direction) = camera.unproject(
+                &Point2::new(cursor_pos.0, cursor_pos.1).cast::<f32>(),
+                &window.size().cast::<f32>(),
+            );
+            template_sphere
+                .set_local_translation(Translation3::from(origin + direction * template_distance));
+        }
     }
 }
