@@ -21,8 +21,6 @@ async fn main() {
     simulation.command("atom_style atomic");
     simulation.command("region box block 0 20 0 20 0 20");
     simulation.command("create_box 1 box");
-    simulation.command("create_atoms 1 single 10 10 10");
-    simulation.command("create_atoms 1 single 15 10 10");
     simulation.command("mass 1 40");
     simulation.command("pair_style lj/cut 7");
     simulation.command("pair_coeff 1 1 0.01 3.3");
@@ -73,19 +71,10 @@ async fn main() {
                             .data()
                             .local_translation()
                             .cast::<f64>()
-                            .vector;
-                        unsafe {
-                            lammps::lammps_sys::lammps_create_atoms(
-                                simulation.session,
-                                1,
-                                std::ptr::null(),
-                                &1,
-                                template_pos.as_ptr(),
-                                &[0., 0., 0.] as *const f64,
-                                std::ptr::null(),
-                                0,
-                            );
-                        }
+                            .vector
+                            .data
+                            .0[0];
+                        simulation.create_atom(1, template_pos, [0., 0., 0.]);
                         atom_spheres.push(window.add_sphere(1.));
                         n_atoms += 1;
 

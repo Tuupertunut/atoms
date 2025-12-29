@@ -52,6 +52,34 @@ impl Lammps {
         };
         return box_bounds;
     }
+
+    pub fn create_atom(&mut self, atom_type: i32, position: [f64; 3], velocity: [f64; 3]) {
+        unsafe {
+            lammps_create_atoms(
+                self.session,
+                1,
+                std::ptr::null(),
+                &atom_type,
+                &position as *const f64,
+                &velocity as *const f64,
+                std::ptr::null(),
+                0,
+            )
+        };
+    }
+
+    pub fn reset_box(&mut self, box_low: [f64; 3], box_high: [f64; 3]) {
+        unsafe {
+            lammps_reset_box(
+                self.session,
+                &box_low as *const f64 as *mut f64,
+                &box_high as *const f64 as *mut f64,
+                0.,
+                0.,
+                0.,
+            )
+        };
+    }
 }
 
 impl Drop for Lammps {
