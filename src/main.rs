@@ -1,6 +1,6 @@
 use kiss3d::{
     camera::{ArcBall, Camera},
-    event::{Action, MouseButton, WindowEvent},
+    event::{Action, Key, MouseButton, WindowEvent},
     light::Light,
     nalgebra::{self, Point2, Point3, Translation3},
     window::Window,
@@ -55,8 +55,12 @@ async fn main() {
     let mut last_button2_pressed_pos = Point2::origin();
     let mut button2_pressed_without_dragging = false;
 
+    let mut simulation_running = true;
+
     while window.render_with_camera(&mut camera).await {
-        simulation.command("run 50");
+        if simulation_running {
+            simulation.command("run 50");
+        }
 
         for mut event in window.events().iter() {
             match event.value {
@@ -113,6 +117,9 @@ async fn main() {
                         event.inhibited = true;
                         template_distance *= f32::powf(1.01, y_offset as f32);
                     }
+                }
+                WindowEvent::Key(Key::Space, Action::Press, _) => {
+                    simulation_running = !simulation_running;
                 }
                 _ => {}
             }
