@@ -1,5 +1,6 @@
 use kiss3d::{
     camera::{ArcBall, Camera},
+    egui::{Slider, TopBottomPanel},
     event::{Action, Key, MouseButton, WindowEvent},
     light::Light,
     nalgebra::{self, Point2, Point3, Translation3},
@@ -57,6 +58,8 @@ async fn main() {
 
     let mut simulation_running = true;
 
+    let mut thermostat_temp = 300.;
+
     while window.render_with_camera(&mut camera).await {
         if simulation_running {
             simulation.command("run 50");
@@ -64,12 +67,16 @@ async fn main() {
 
         for mut event in window.events().iter() {
             match event.value {
-                WindowEvent::MouseButton(MouseButton::Button1, Action::Press, _) => {
+                WindowEvent::MouseButton(MouseButton::Button1, Action::Press, _)
+                    if !window.is_egui_capturing_mouse() =>
+                {
                     let cursor_pos = window.cursor_pos().unwrap();
                     last_button1_pressed_pos = Point2::new(cursor_pos.0, cursor_pos.1);
                     button1_pressed_without_dragging = true;
                 }
-                WindowEvent::MouseButton(MouseButton::Button1, Action::Release, _) => {
+                WindowEvent::MouseButton(MouseButton::Button1, Action::Release, _)
+                    if !window.is_egui_capturing_mouse() =>
+                {
                     if template_sphere.is_visible() && button1_pressed_without_dragging {
                         let template_pos = template_sphere
                             .data()
@@ -86,12 +93,16 @@ async fn main() {
                     }
                     button1_pressed_without_dragging = false;
                 }
-                WindowEvent::MouseButton(MouseButton::Button2, Action::Press, _) => {
+                WindowEvent::MouseButton(MouseButton::Button2, Action::Press, _)
+                    if !window.is_egui_capturing_mouse() =>
+                {
                     let cursor_pos = window.cursor_pos().unwrap();
                     last_button2_pressed_pos = Point2::new(cursor_pos.0, cursor_pos.1);
                     button2_pressed_without_dragging = true;
                 }
-                WindowEvent::MouseButton(MouseButton::Button2, Action::Release, _) => {
+                WindowEvent::MouseButton(MouseButton::Button2, Action::Release, _)
+                    if !window.is_egui_capturing_mouse() =>
+                {
                     if button2_pressed_without_dragging {
                         template_sphere.set_visible(!template_sphere.is_visible());
                     }
@@ -112,13 +123,15 @@ async fn main() {
                         button2_pressed_without_dragging = false;
                     }
                 }
-                WindowEvent::Scroll(_, y_offset, _) => {
+                WindowEvent::Scroll(_, y_offset, _) if !window.is_egui_capturing_mouse() => {
                     if template_sphere.is_visible() {
                         event.inhibited = true;
                         template_distance *= f32::powf(1.01, y_offset as f32);
                     }
                 }
-                WindowEvent::Key(Key::Space, Action::Press, _) => {
+                WindowEvent::Key(Key::Space, Action::Press, _)
+                    if !window.is_egui_capturing_keyboard() =>
+                {
                     simulation_running = !simulation_running;
                 }
                 _ => {}
@@ -156,5 +169,11 @@ async fn main() {
             template_sphere
                 .set_local_translation(Translation3::from(origin + direction * template_distance));
         }
+
+        window.draw_ui(|ctx| {
+            TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+                ui.add(Slider::new(&mut thermostat_temp, 0.0..=1200.0));
+            });
+        });
     }
 }
