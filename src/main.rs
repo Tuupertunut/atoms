@@ -4,58 +4,39 @@ use kiss3d::{
     event::{Action, Key, MouseButton, WindowEvent},
     light::Light,
     nalgebra::{self, Point2, Point3, Translation3},
+    scene::SceneNode,
     window::Window,
 };
 use lammps::Lammps;
-use std::{iter, slice};
+use std::slice;
 
 mod lammps;
 
 #[kiss3d::main]
 async fn main() {
-    println!("Hello, world!");
-    let mut simulation = Lammps::open();
-
-    simulation.command("units metal");
-    simulation.command("dimension 3");
-    simulation.command("boundary p p p");
-    simulation.command("atom_style atomic");
-    simulation.command("region box block 0 20 0 20 0 20");
-    simulation.command("create_box 1 box");
-    simulation.command("mass 1 40");
-    simulation.command("pair_style lj/cut 7");
-    simulation.command("pair_coeff 1 1 0.01 3.3");
-    simulation.command("fix 1 all nve");
-    simulation.command("timestep 0.001");
-
-    let mut n_atoms = simulation.get_natoms();
-
+    // Initialize window
     let mut window = Window::new_with_size("Atoms", 1000, 800);
     window.set_light(Light::StickToCamera);
 
     let mut camera = ArcBall::new(Point3::new(10., 10., -20.), Point3::new(10., 10., 10.));
     camera.set_dist_step(0.99);
 
-    let mut box_cuboid = window.add_cube(0., 0., 0.);
-    box_cuboid.set_surface_rendering_activation(false);
-    box_cuboid.set_lines_width(1.);
+    // Initialize simulation
+    let mut simulation = Lammps::open();
+    simulation.command("units metal");
+    simulation.command("dimension 3");
+    simulation.command("boundary p p p");
+    simulation.command("atom_style atomic");
+    simulation.command("region box block 0 20 0 20 0 20");
+    simulation.command("create_box 1 box");
+    // Using argon mass and Lennard-Jones parameters
+    simulation.command("mass 1 40");
+    simulation.command("pair_style lj/cut 7");
+    simulation.command("pair_coeff 1 1 0.01 3.3");
+    simulation.command("fix 1 all nve");
+    simulation.command("timestep 0.001");
 
-    let mut atom_spheres = iter::repeat_with(|| window.add_sphere(1.))
-        .take(n_atoms)
-        .collect::<Vec<_>>();
-
-    let mut template_sphere = window.add_sphere(1.);
-    template_sphere.set_surface_rendering_activation(false);
-    template_sphere.set_lines_width(0.5);
-    template_sphere.set_visible(false);
-
-    let mut template_distance = 30.;
-
-    let mut last_button1_pressed_pos = Point2::origin();
-    let mut button1_pressed_without_dragging = false;
-    let mut last_button2_pressed_pos = Point2::origin();
-    let mut button2_pressed_without_dragging = false;
-
+    // Initialize simulation control parameters
     let mut simulation_running = true;
 
     let mut thermostat_enabled = false;
@@ -63,11 +44,35 @@ async fn main() {
     let mut barostat_enabled = false;
     let mut barostat_pressure = 300.;
 
+    // Initialize simulation structures in 3D scene
+    let mut box_cuboid = window.add_cube(0., 0., 0.);
+    box_cuboid.set_surface_rendering_activation(false);
+    box_cuboid.set_lines_width(1.);
+
+    let mut atom_spheres = Vec::<SceneNode>::new();
+
+    // Initialize template sphere, the temporary sphere to display when adding atoms
+    let mut template_sphere = window.add_sphere(1.);
+    template_sphere.set_surface_rendering_activation(false);
+    template_sphere.set_lines_width(0.5);
+    template_sphere.set_visible(false);
+
+    let mut template_distance = 30.;
+
+    // Initialize button drag monitoring
+    let mut last_button1_pressed_pos = Point2::origin();
+    let mut button1_pressed_without_dragging = false;
+    let mut last_button2_pressed_pos = Point2::origin();
+    let mut button2_pressed_without_dragging = false;
+
+    // Run the main render loop
     while window.render_with_camera(&mut camera).await {
+        // Run simulation one frame forward
         if simulation_running {
             simulation.command("run 50");
         }
 
+        // Check for 3D UI interaction events
         for mut event in window.events().iter() {
             match event.value {
                 WindowEvent::MouseButton(MouseButton::Button1, Action::Press, _)
@@ -81,6 +86,7 @@ async fn main() {
                     if !window.is_egui_capturing_mouse() =>
                 {
                     if template_sphere.is_visible() && button1_pressed_without_dragging {
+                        // Add new atom
                         let template_pos = template_sphere
                             .data()
                             .local_translation()
@@ -90,7 +96,6 @@ async fn main() {
                             .0[0];
                         simulation.create_atom(1, template_pos, [0., 0., 0.]);
                         atom_spheres.push(window.add_sphere(1.));
-                        n_atoms += 1;
 
                         template_sphere.set_visible(false);
                     }
@@ -141,38 +146,7 @@ async fn main() {
             }
         }
 
-        let (box_low, box_high) = simulation.extract_box();
-        let (box_low, box_high) = (Point3::from(box_low), Point3::from(box_high));
-
-        let scale = (box_high - box_low).cast::<f32>();
-        box_cuboid.set_local_scale(scale.x, scale.y, scale.z);
-
-        box_cuboid.set_local_translation(
-            Translation3::from(nalgebra::center(&box_low, &box_high)).cast::<f32>(),
-        );
-
-        let positions = unsafe {
-            slice::from_raw_parts(
-                simulation.extract_atom("x") as *const *const [f64; 3],
-                n_atoms,
-            )
-            .iter()
-            .map(|&ptr| *ptr)
-        };
-
-        for (atom_sphere, atom_pos) in atom_spheres.iter_mut().zip(positions) {
-            atom_sphere.set_local_translation(Translation3::from(atom_pos).cast::<f32>());
-        }
-
-        if let Some(cursor_pos) = window.cursor_pos() {
-            let (origin, direction) = camera.unproject(
-                &Point2::new(cursor_pos.0, cursor_pos.1).cast::<f32>(),
-                &window.size().cast::<f32>(),
-            );
-            template_sphere
-                .set_local_translation(Translation3::from(origin + direction * template_distance));
-        }
-
+        // Draw overlay 2D UI and check for its interaction events
         let temperature = simulation.get_thermo("temp");
         let pressure = simulation.get_thermo("press");
 
@@ -218,5 +192,40 @@ async fn main() {
                 });
             });
         });
+
+        // Update box position in 3D
+        let (box_low, box_high) = simulation.extract_box();
+        let (box_low, box_high) = (Point3::from(box_low), Point3::from(box_high));
+
+        let scale = (box_high - box_low).cast::<f32>();
+        box_cuboid.set_local_scale(scale.x, scale.y, scale.z);
+
+        box_cuboid.set_local_translation(
+            Translation3::from(nalgebra::center(&box_low, &box_high)).cast::<f32>(),
+        );
+
+        // Update atom positions in 3D
+        let positions = unsafe {
+            slice::from_raw_parts(
+                simulation.extract_atom("x") as *const *const [f64; 3],
+                atom_spheres.len(),
+            )
+            .iter()
+            .map(|&ptr| *ptr)
+        };
+
+        for (atom_sphere, atom_pos) in atom_spheres.iter_mut().zip(positions) {
+            atom_sphere.set_local_translation(Translation3::from(atom_pos).cast::<f32>());
+        }
+
+        // Update template sphere position in 3D
+        if let Some(cursor_pos) = window.cursor_pos() {
+            let (origin, direction) = camera.unproject(
+                &Point2::new(cursor_pos.0, cursor_pos.1).cast::<f32>(),
+                &window.size().cast::<f32>(),
+            );
+            template_sphere
+                .set_local_translation(Translation3::from(origin + direction * template_distance));
+        }
     }
 }
