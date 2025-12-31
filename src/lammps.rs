@@ -1,6 +1,6 @@
 use lammps_sys::*;
 use std::{
-    ffi::{CString, c_void},
+    ffi::{CString, c_int, c_void},
     ptr,
 };
 
@@ -59,7 +59,7 @@ impl Lammps {
                 self.session,
                 1,
                 std::ptr::null(),
-                &atom_type,
+                &(atom_type as c_int),
                 &position as *const f64,
                 &velocity as *const f64,
                 std::ptr::null(),
@@ -79,6 +79,10 @@ impl Lammps {
                 0.,
             )
         };
+    }
+
+    pub fn get_thermo(&self, keyword: &str) -> f64 {
+        return unsafe { lammps_get_thermo(self.session, CString::new(keyword).unwrap().as_ptr()) };
     }
 }
 

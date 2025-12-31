@@ -173,6 +173,9 @@ async fn main() {
                 .set_local_translation(Translation3::from(origin + direction * template_distance));
         }
 
+        let temperature = simulation.get_thermo("temp");
+        let pressure = simulation.get_thermo("press");
+
         window.draw_ui(|ctx| {
             TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
                 Grid::new("stat_grid").num_columns(2).show(ui, |ui| {
@@ -184,24 +187,31 @@ async fn main() {
                         // the second column before this point.
                         bar_width = f32::max(0., ui.available_width() - 80.);
 
+                        let max_temperature = 1200.;
                         ui.spacing_mut().slider_width = bar_width;
-                        ui.add(Slider::new(&mut thermostat_temperature, 0.0..=1200.).suffix(" K"));
                         ui.add(
-                            ProgressBar::new(240. / 1200.)
+                            Slider::new(&mut thermostat_temperature, 0.0..=max_temperature)
+                                .suffix(" K"),
+                        );
+                        ui.add(
+                            ProgressBar::new((temperature / max_temperature) as f32)
                                 .desired_width(bar_width)
-                                .text(format!("{:.2} K", 240.)),
+                                .text(format!("{:.2} K", temperature)),
                         );
                     });
                     ui.end_row();
 
                     ui.checkbox(&mut barostat_enabled, "Barostat");
                     ui.vertical(|ui| {
+                        let max_pressure = 1200.;
                         ui.spacing_mut().slider_width = bar_width;
-                        ui.add(Slider::new(&mut barostat_pressure, 0.0..=1200.).suffix(" bar"));
                         ui.add(
-                            ProgressBar::new(0. / 1200.)
+                            Slider::new(&mut barostat_pressure, 0.0..=max_pressure).suffix(" bar"),
+                        );
+                        ui.add(
+                            ProgressBar::new((pressure / max_pressure) as f32)
                                 .desired_width(bar_width)
-                                .text(format!("{:.2} bar", 0.)),
+                                .text(format!("{:.2} bar", pressure)),
                         );
                     });
                     ui.end_row();
