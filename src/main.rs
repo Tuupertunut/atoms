@@ -30,14 +30,16 @@ async fn main() {
     simulation.command("region box block 0 20 0 20 0 20");
     simulation.command("create_box 1 box");
     // Using argon mass and Lennard-Jones parameters
+    // https://www.researchgate.net/figure/Lennard-Jones-LJ-potential-parameters-of-different-materials-considered-in-thepresent_tbl2_319412425
     simulation.command("mass 1 40");
     simulation.command("pair_style lj/cut 7");
-    simulation.command("pair_coeff 1 1 0.01 3.3");
-    simulation.command("fix 1 all nve");
+    simulation.command("pair_coeff 1 1 0.01 3.4");
     simulation.command("timestep 0.001");
 
     // Initialize simulation control parameters
     let mut simulation_running = true;
+
+    let mut ensemble_changed = true;
 
     let mut thermostat_enabled = false;
     let mut thermostat_temperature = 300.;
@@ -67,6 +69,35 @@ async fn main() {
 
     // Run the main render loop
     while window.render_with_camera(&mut camera).await {
+        // Check for ensemble changes, nve, nvt, nph, npt
+        if ensemble_changed {
+            simulation.command("unfix 1");
+
+            if thermostat_enabled && barostat_enabled {
+                simulation.command(&format!(
+                    "fix 1 all npt temp {} {} 0.1 iso {} {} 1",
+                    thermostat_temperature,
+                    thermostat_temperature,
+                    barostat_pressure,
+                    barostat_pressure
+                ));
+            } else if thermostat_enabled {
+                simulation.command(&format!(
+                    "fix 1 all nvt temp {} {} 0.1",
+                    thermostat_temperature, thermostat_temperature
+                ));
+            } else if barostat_enabled {
+                simulation.command(&format!(
+                    "fix 1 all nph iso {} {} 1",
+                    barostat_pressure, barostat_pressure
+                ));
+            } else {
+                simulation.command("fix 1 all nve");
+            }
+
+            ensemble_changed = false;
+        }
+
         // Run simulation one frame forward
         if simulation_running {
             simulation.command("run 50");
@@ -155,39 +186,59 @@ async fn main() {
                 Grid::new("stat_grid").num_columns(2).show(ui, |ui| {
                     let mut bar_width = 0.;
 
-                    ui.checkbox(&mut thermostat_enabled, "Thermostat");
+                    let checkbox = ui.checkbox(&mut thermostat_enabled, "Thermostat");
+                    if checkbox.changed() {
+                        ensemble_changed = true;
+                    }
+
                     ui.vertical(|ui| {
                         // Calculating bar width here because we don't know the available space in
                         // the second column before this point.
                         bar_width = f32::max(0., ui.available_width() - 80.);
 
                         let max_temperature = 1200.;
+
                         ui.spacing_mut().slider_width = bar_width;
-                        ui.add(
+                        let slider = ui.add(
                             Slider::new(&mut thermostat_temperature, 0.0..=max_temperature)
                                 .suffix(" K"),
                         );
+                        if slider.changed() {
+                            ensemble_changed = true;
+                        }
+
                         ui.add(
                             ProgressBar::new((temperature / max_temperature) as f32)
                                 .desired_width(bar_width)
                                 .text(format!("{:.2} K", temperature)),
                         );
                     });
+
                     ui.end_row();
 
-                    ui.checkbox(&mut barostat_enabled, "Barostat");
+                    let checkbox = ui.checkbox(&mut barostat_enabled, "Barostat");
+                    if checkbox.changed() {
+                        ensemble_changed = true;
+                    }
+
                     ui.vertical(|ui| {
                         let max_pressure = 1200.;
+
                         ui.spacing_mut().slider_width = bar_width;
-                        ui.add(
+                        let slider = ui.add(
                             Slider::new(&mut barostat_pressure, 0.0..=max_pressure).suffix(" bar"),
                         );
+                        if slider.changed() {
+                            ensemble_changed = true;
+                        }
+
                         ui.add(
                             ProgressBar::new((pressure / max_pressure) as f32)
                                 .desired_width(bar_width)
                                 .text(format!("{:.2} bar", pressure)),
                         );
                     });
+
                     ui.end_row();
                 });
             });
