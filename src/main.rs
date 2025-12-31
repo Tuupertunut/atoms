@@ -1,6 +1,6 @@
 use kiss3d::{
     camera::{ArcBall, Camera},
-    egui::{Slider, TopBottomPanel},
+    egui::{Grid, ProgressBar, Slider, TopBottomPanel},
     event::{Action, Key, MouseButton, WindowEvent},
     light::Light,
     nalgebra::{self, Point2, Point3, Translation3},
@@ -58,7 +58,10 @@ async fn main() {
 
     let mut simulation_running = true;
 
-    let mut thermostat_temp = 300.;
+    let mut thermostat_enabled = false;
+    let mut thermostat_temperature = 300.;
+    let mut barostat_enabled = false;
+    let mut barostat_pressure = 300.;
 
     while window.render_with_camera(&mut camera).await {
         if simulation_running {
@@ -172,7 +175,37 @@ async fn main() {
 
         window.draw_ui(|ctx| {
             TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-                ui.add(Slider::new(&mut thermostat_temp, 0.0..=1200.0));
+                Grid::new("stat_grid").num_columns(2).show(ui, |ui| {
+                    let mut bar_width = 0.;
+
+                    ui.checkbox(&mut thermostat_enabled, "Thermostat");
+                    ui.vertical(|ui| {
+                        // Calculating bar width here because we don't know the available space in
+                        // the second column before this point.
+                        bar_width = f32::max(0., ui.available_width() - 80.);
+
+                        ui.spacing_mut().slider_width = bar_width;
+                        ui.add(Slider::new(&mut thermostat_temperature, 0.0..=1200.).suffix(" K"));
+                        ui.add(
+                            ProgressBar::new(240. / 1200.)
+                                .desired_width(bar_width)
+                                .text(format!("{:.2} K", 240.)),
+                        );
+                    });
+                    ui.end_row();
+
+                    ui.checkbox(&mut barostat_enabled, "Barostat");
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().slider_width = bar_width;
+                        ui.add(Slider::new(&mut barostat_pressure, 0.0..=1200.).suffix(" bar"));
+                        ui.add(
+                            ProgressBar::new(0. / 1200.)
+                                .desired_width(bar_width)
+                                .text(format!("{:.2} bar", 0.)),
+                        );
+                    });
+                    ui.end_row();
+                });
             });
         });
     }
