@@ -92,7 +92,13 @@ async fn main() {
                                 .data
                                 .0[0];
                             simulation.create_atom(1, template_pos, [0., 0., 0.]);
-                            atom_spheres.push(window.add_sphere(1.));
+                            let mut atom_sphere = window.add_sphere(1.);
+                            atom_sphere.set_color(
+                                0x80 as f32 / 256.,
+                                0xD1 as f32 / 256.,
+                                0xE3 as f32 / 256.,
+                            );
+                            atom_spheres.push(atom_sphere);
 
                             template_add_mode = false;
                         } else {
