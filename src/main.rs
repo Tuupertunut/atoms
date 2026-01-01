@@ -4,6 +4,10 @@ use kiss3d::{
     event::{Action, Key, MouseButton, WindowEvent},
     light::Light,
     nalgebra::{self, Point2, Point3, Translation3},
+    parry3d::{
+        query::{Ray, RayCast},
+        shape::Ball,
+    },
     scene::SceneNode,
     window::Window,
 };
@@ -53,13 +57,14 @@ async fn main() {
 
     let mut atom_spheres = Vec::<SceneNode>::new();
 
-    // Initialize template sphere, the temporary sphere to display when adding atoms
+    // Initialize template sphere, the temporary sphere to display when adding/deleting atoms
     let mut template_sphere = window.add_sphere(1.);
     template_sphere.set_surface_rendering_activation(false);
     template_sphere.set_lines_width(0.5);
-    template_sphere.set_visible(false);
 
+    let mut template_add_mode = false;
     let mut template_distance = 30.;
+    let mut selection = Option::<Translation3<f32>>::None;
 
     // Initialize button drag monitoring
     let mut last_button1_pressed_pos = Point2::origin();
@@ -69,43 +74,70 @@ async fn main() {
 
     // Run the main render loop
     while window.render_with_camera(&mut camera).await {
-        // Check for ensemble changes, nve, nvt, nph, npt
-        if ensemble_changed {
-            simulation.command("unfix 1");
-
-            if thermostat_enabled && barostat_enabled {
-                simulation.command(&format!(
-                    "fix 1 all npt temp {} {} 0.1 iso {} {} 1",
-                    thermostat_temperature,
-                    thermostat_temperature,
-                    barostat_pressure,
-                    barostat_pressure
-                ));
-            } else if thermostat_enabled {
-                simulation.command(&format!(
-                    "fix 1 all nvt temp {} {} 0.1",
-                    thermostat_temperature, thermostat_temperature
-                ));
-            } else if barostat_enabled {
-                simulation.command(&format!(
-                    "fix 1 all nph iso {} {} 1",
-                    barostat_pressure, barostat_pressure
-                ));
-            } else {
-                simulation.command("fix 1 all nve");
-            }
-
-            ensemble_changed = false;
-        }
-
-        // Run simulation one frame forward
-        if simulation_running {
-            simulation.command("run 50");
-        }
-
         // Check for 3D UI interaction events
         for mut event in window.events().iter() {
             match event.value {
+                // Handle 3D UI interaction
+                WindowEvent::MouseButton(MouseButton::Button1, Action::Release, _)
+                    if !window.is_egui_capturing_mouse() =>
+                {
+                    if button1_pressed_without_dragging {
+                        if template_add_mode {
+                            // Add new atom
+                            let template_pos = template_sphere
+                                .data()
+                                .local_translation()
+                                .cast::<f64>()
+                                .vector
+                                .data
+                                .0[0];
+                            simulation.create_atom(1, template_pos, [0., 0., 0.]);
+                            atom_spheres.push(window.add_sphere(1.));
+
+                            template_add_mode = false;
+                        } else {
+                            if let Some(selected_pos) = selection {
+                                // Delete atom
+                                // Lammps does not directly allow deleting a single atom, so create
+                                // a temporary region around it and delete everything inside it. In
+                                // practice the region is so small that there is always only that
+                                // one atom in it.
+                                simulation.command(&format!(
+                                    "region temp sphere {} {} {} 0.01",
+                                    selected_pos.x, selected_pos.y, selected_pos.z
+                                ));
+                                simulation.command("delete_atoms region temp");
+                                simulation.command("region temp delete");
+                                window.remove_node(&mut atom_spheres.pop().unwrap());
+                            }
+                        }
+                    }
+
+                    button1_pressed_without_dragging = false;
+                }
+                WindowEvent::MouseButton(MouseButton::Button2, Action::Release, _)
+                    if !window.is_egui_capturing_mouse() =>
+                {
+                    if button2_pressed_without_dragging {
+                        template_add_mode = !template_add_mode;
+                    }
+
+                    button2_pressed_without_dragging = false;
+                }
+                WindowEvent::Scroll(_, y_offset, _) if !window.is_egui_capturing_mouse() => {
+                    if template_add_mode {
+                        event.inhibited = true;
+                        template_distance *= f32::powf(1.01, y_offset as f32);
+                    }
+                }
+                WindowEvent::Key(Key::Space, Action::Press, _)
+                    if !window.is_egui_capturing_keyboard() =>
+                {
+                    simulation_running = !simulation_running;
+                }
+
+                // Update button drag monitoring. Some actions should only happen when buttons are
+                // clicked without dragging so we keep track of it.
                 WindowEvent::MouseButton(MouseButton::Button1, Action::Press, _)
                     if !window.is_egui_capturing_mouse() =>
                 {
@@ -113,39 +145,12 @@ async fn main() {
                     last_button1_pressed_pos = Point2::new(cursor_pos.0, cursor_pos.1);
                     button1_pressed_without_dragging = true;
                 }
-                WindowEvent::MouseButton(MouseButton::Button1, Action::Release, _)
-                    if !window.is_egui_capturing_mouse() =>
-                {
-                    if template_sphere.is_visible() && button1_pressed_without_dragging {
-                        // Add new atom
-                        let template_pos = template_sphere
-                            .data()
-                            .local_translation()
-                            .cast::<f64>()
-                            .vector
-                            .data
-                            .0[0];
-                        simulation.create_atom(1, template_pos, [0., 0., 0.]);
-                        atom_spheres.push(window.add_sphere(1.));
-
-                        template_sphere.set_visible(false);
-                    }
-                    button1_pressed_without_dragging = false;
-                }
                 WindowEvent::MouseButton(MouseButton::Button2, Action::Press, _)
                     if !window.is_egui_capturing_mouse() =>
                 {
                     let cursor_pos = window.cursor_pos().unwrap();
                     last_button2_pressed_pos = Point2::new(cursor_pos.0, cursor_pos.1);
                     button2_pressed_without_dragging = true;
-                }
-                WindowEvent::MouseButton(MouseButton::Button2, Action::Release, _)
-                    if !window.is_egui_capturing_mouse() =>
-                {
-                    if button2_pressed_without_dragging {
-                        template_sphere.set_visible(!template_sphere.is_visible());
-                    }
-                    button2_pressed_without_dragging = false;
                 }
                 WindowEvent::CursorPos(cursor_x, cursor_y, _) => {
                     let moved_pos = Point2::new(cursor_x, cursor_y);
@@ -162,17 +167,7 @@ async fn main() {
                         button2_pressed_without_dragging = false;
                     }
                 }
-                WindowEvent::Scroll(_, y_offset, _) if !window.is_egui_capturing_mouse() => {
-                    if template_sphere.is_visible() {
-                        event.inhibited = true;
-                        template_distance *= f32::powf(1.01, y_offset as f32);
-                    }
-                }
-                WindowEvent::Key(Key::Space, Action::Press, _)
-                    if !window.is_egui_capturing_keyboard() =>
-                {
-                    simulation_running = !simulation_running;
-                }
+
                 _ => {}
             }
         }
@@ -244,6 +239,40 @@ async fn main() {
             });
         });
 
+        // Check for ensemble changes, nve, nvt, nph, npt
+        if ensemble_changed {
+            simulation.command("unfix 1");
+
+            if thermostat_enabled && barostat_enabled {
+                simulation.command(&format!(
+                    "fix 1 all npt temp {} {} 0.1 iso {} {} 1",
+                    thermostat_temperature,
+                    thermostat_temperature,
+                    barostat_pressure,
+                    barostat_pressure
+                ));
+            } else if thermostat_enabled {
+                simulation.command(&format!(
+                    "fix 1 all nvt temp {} {} 0.1",
+                    thermostat_temperature, thermostat_temperature
+                ));
+            } else if barostat_enabled {
+                simulation.command(&format!(
+                    "fix 1 all nph iso {} {} 1",
+                    barostat_pressure, barostat_pressure
+                ));
+            } else {
+                simulation.command("fix 1 all nve");
+            }
+
+            ensemble_changed = false;
+        }
+
+        // Run simulation one frame forward
+        if simulation_running {
+            simulation.command("run 50");
+        }
+
         // Update box position in 3D
         let (box_low, box_high) = simulation.extract_box();
         let (box_low, box_high) = (Point3::from(box_low), Point3::from(box_high));
@@ -269,14 +298,49 @@ async fn main() {
             atom_sphere.set_local_translation(Translation3::from(atom_pos).cast::<f32>());
         }
 
-        // Update template sphere position in 3D
+        // Update template sphere in 3D
         if let Some(cursor_pos) = window.cursor_pos() {
             let (origin, direction) = camera.unproject(
                 &Point2::new(cursor_pos.0, cursor_pos.1).cast::<f32>(),
                 &window.size().cast::<f32>(),
             );
-            template_sphere
-                .set_local_translation(Translation3::from(origin + direction * template_distance));
+            let cursor_ray = Ray::new(origin, direction);
+
+            if template_add_mode {
+                selection = None;
+
+                template_sphere.set_visible(true);
+                template_sphere.set_lines_color(Some(Point3::new(0., 1., 0.)));
+                template_sphere.set_local_translation(Translation3::from(
+                    cursor_ray.point_at(template_distance),
+                ));
+            } else {
+                selection = atom_spheres
+                    .iter()
+                    .filter_map(|atom_sphere| {
+                        Ball::new(atom_sphere.data().local_scale().x / 2.)
+                            .cast_ray(
+                                &atom_sphere.data().local_transformation(),
+                                &cursor_ray,
+                                camera.clip_planes().1,
+                                true,
+                            )
+                            .map(|distance| (atom_sphere.data().local_translation(), distance))
+                    })
+                    .min_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap())
+                    .map(|(selected_pos, _)| selected_pos);
+
+                match selection {
+                    Some(selected_pos) => {
+                        template_sphere.set_visible(true);
+                        template_sphere.set_lines_color(Some(Point3::new(1., 0., 0.)));
+                        template_sphere.set_local_translation(selected_pos);
+                    }
+                    None => {
+                        template_sphere.set_visible(false);
+                    }
+                }
+            }
         }
     }
 }
