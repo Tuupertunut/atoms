@@ -1,7 +1,7 @@
 use lammps_sys::*;
 use std::{
-    ffi::{CString, c_int, c_void},
-    ptr,
+    ffi::{CString, c_char, c_int, c_void},
+    iter, ptr,
 };
 
 /// Lammps C API bindings generated from library.h
@@ -16,9 +16,22 @@ pub struct Lammps {
 }
 
 impl Lammps {
-    pub fn open() -> Self {
+    pub fn open(args: &[&str]) -> Self {
+        let c_args = iter::chain(iter::once(&""), args.iter())
+            .map(|&s| CString::new(s).unwrap())
+            .collect::<Vec<_>>();
         return Self {
-            session: unsafe { lammps_open_no_mpi(0, ptr::null_mut(), ptr::null_mut()) },
+            session: unsafe {
+                lammps_open_no_mpi(
+                    c_args.len() as c_int,
+                    c_args
+                        .iter()
+                        .map(|s| s.as_ptr() as *mut c_char)
+                        .collect::<Vec<_>>()
+                        .as_mut_ptr(),
+                    ptr::null_mut(),
+                )
+            },
         };
     }
 

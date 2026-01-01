@@ -26,7 +26,7 @@ async fn main() {
     camera.set_dist_step(0.99);
 
     // Initialize simulation
-    let mut simulation = Lammps::open();
+    let mut simulation = Lammps::open(&["-log", "none"]);
     simulation.command("units metal");
     simulation.command("dimension 3");
     simulation.command("boundary p p p");
