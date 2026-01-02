@@ -36,7 +36,7 @@ async fn main() {
     // Using argon mass and Lennard-Jones parameters
     // https://www.researchgate.net/figure/Lennard-Jones-LJ-potential-parameters-of-different-materials-considered-in-thepresent_tbl2_319412425
     simulation.command("mass 1 40");
-    simulation.command("pair_style lj/cut 7");
+    simulation.command("pair_style lj/cut 15");
     simulation.command("pair_coeff 1 1 0.01 3.4");
     simulation.command("timestep 0.001");
 
