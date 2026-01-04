@@ -1,6 +1,8 @@
 # Atoms
 
-An educational atom sandbox simulator. Check [report.md](report.md).
+An educational atom sandbox simulator. It is meant to teach people an intuitive understanding on how atoms will behave in different conditions. LAMMPS molecular dynamics simulator is used as the simulation backend. Check [report.md](report.md) for more info.
+
+![screenshot](screenshot.png)
 
 ## How to use
 
