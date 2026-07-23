@@ -8,4 +8,4 @@ kiss3d = { version = "0.37.2", features = ["egui"] }
 
 [build-dependencies]
 bindgen = "0.72.1"
-cmake = "0.1.57"
+cmake = "0.1.58"
