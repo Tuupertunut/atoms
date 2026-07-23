@@ -1,17 +1,18 @@
 use kiss3d::{
-    camera::{ArcBall, Camera},
-    egui::{Grid, ProgressBar, Slider, TopBottomPanel},
+    camera::{Camera3d, OrbitCamera3d},
+    color::{self, Color},
+    egui::{Grid, Panel, ProgressBar, Slider},
     event::{Action, Key, MouseButton, WindowEvent},
+    glamx::{DVec2, DVec3, Vec3},
     light::Light,
-    nalgebra::{self, Point2, Point3, Translation3},
-    parry3d::{
-        query::{Ray, RayCast},
-        shape::Ball,
-    },
-    scene::SceneNode,
+    scene::SceneNode3d,
     window::Window,
 };
 use lammps::Lammps;
+use parry3d::{
+    query::{Ray, RayCast},
+    shape::Ball,
+};
 use std::slice;
 
 mod lammps;
@@ -19,11 +20,13 @@ mod lammps;
 #[kiss3d::main]
 async fn main() {
     // Initialize window
-    let mut window = Window::new_with_size("Atoms", 1000, 800);
-    window.set_light(Light::StickToCamera);
+    let mut window = Window::new_with_size("Atoms", 1000, 800).await;
 
-    let mut camera = ArcBall::new(Point3::new(10., 10., -20.), Point3::new(10., 10., 10.));
+    let mut camera = OrbitCamera3d::new(Vec3::new(10., 10., -20.), Vec3::new(10., 10., 10.));
     camera.set_dist_step(0.99);
+
+    let mut scene = SceneNode3d::empty();
+    let mut light = scene.add_light(Light::default());
 
     // Initialize simulation
     let mut simulation = Lammps::open(&["-log", "none"]);
@@ -51,29 +54,29 @@ async fn main() {
     let mut barostat_pressure = 300.;
 
     // Initialize simulation structures in 3D scene
-    let mut box_cuboid = window.add_cube(0., 0., 0.);
+    let mut box_cuboid = scene.add_cube(0., 0., 0.);
     box_cuboid.set_surface_rendering_activation(false);
-    box_cuboid.set_lines_width(1.);
+    box_cuboid.set_lines_width(1., false);
 
-    let mut atom_spheres = Vec::<SceneNode>::new();
+    let mut atom_spheres = Vec::<SceneNode3d>::new();
 
     // Initialize template sphere, the temporary sphere to display when adding/deleting atoms
-    let mut template_sphere = window.add_sphere(1.);
+    let mut template_sphere = scene.add_sphere(1.);
     template_sphere.set_surface_rendering_activation(false);
-    template_sphere.set_lines_width(0.5);
+    template_sphere.set_lines_width(0.5, false);
 
     let mut template_add_mode = false;
     let mut template_distance = 30.;
-    let mut selection = Option::<Translation3<f32>>::None;
+    let mut selection = Option::<Vec3>::None;
 
     // Initialize button drag monitoring
-    let mut last_button1_pressed_pos = Point2::origin();
+    let mut last_button1_pressed_pos = DVec2::ZERO;
     let mut button1_pressed_without_dragging = false;
-    let mut last_button2_pressed_pos = Point2::origin();
+    let mut last_button2_pressed_pos = DVec2::ZERO;
     let mut button2_pressed_without_dragging = false;
 
     // Run the main render loop
-    while window.render_with_camera(&mut camera).await {
+    while window.render_3d(&mut scene, &mut camera).await {
         // Check for 3D UI interaction events
         for mut event in window.events().iter() {
             match event.value {
@@ -84,20 +87,15 @@ async fn main() {
                     if button1_pressed_without_dragging {
                         if template_add_mode {
                             // Add new atom
-                            let template_pos = template_sphere
-                                .data()
-                                .local_translation()
-                                .cast::<f64>()
-                                .vector
-                                .data
-                                .0[0];
+                            let template_pos = template_sphere.position().as_dvec3().to_array();
                             simulation.create_atom(1, template_pos, [0., 0., 0.]);
-                            let mut atom_sphere = window.add_sphere(1.);
-                            atom_sphere.set_color(
+                            let mut atom_sphere = scene.add_sphere(1.);
+                            atom_sphere.set_color(Color::new(
                                 0x80 as f32 / 256.,
                                 0xD1 as f32 / 256.,
                                 0xE3 as f32 / 256.,
-                            );
+                                1.,
+                            ));
                             atom_spheres.push(atom_sphere);
 
                             template_add_mode = false;
@@ -114,7 +112,7 @@ async fn main() {
                                 ));
                                 simulation.command("delete_atoms region temp");
                                 simulation.command("region temp delete");
-                                window.remove_node(&mut atom_spheres.pop().unwrap());
+                                atom_spheres.pop().unwrap().remove();
                             }
                         }
                     }
@@ -148,27 +146,25 @@ async fn main() {
                     if !window.is_egui_capturing_mouse() =>
                 {
                     let cursor_pos = window.cursor_pos().unwrap();
-                    last_button1_pressed_pos = Point2::new(cursor_pos.0, cursor_pos.1);
+                    last_button1_pressed_pos = DVec2::from(cursor_pos);
                     button1_pressed_without_dragging = true;
                 }
                 WindowEvent::MouseButton(MouseButton::Button2, Action::Press, _)
                     if !window.is_egui_capturing_mouse() =>
                 {
                     let cursor_pos = window.cursor_pos().unwrap();
-                    last_button2_pressed_pos = Point2::new(cursor_pos.0, cursor_pos.1);
+                    last_button2_pressed_pos = DVec2::from(cursor_pos);
                     button2_pressed_without_dragging = true;
                 }
                 WindowEvent::CursorPos(cursor_x, cursor_y, _) => {
-                    let moved_pos = Point2::new(cursor_x, cursor_y);
+                    let moved_pos = DVec2::new(cursor_x, cursor_y);
                     if button1_pressed_without_dragging
-                        && nalgebra::distance_squared(&last_button1_pressed_pos, &moved_pos)
-                            >= f64::powi(10., 2)
+                        && last_button1_pressed_pos.distance_squared(moved_pos) >= f64::powi(10., 2)
                     {
                         button1_pressed_without_dragging = false;
                     }
                     if button2_pressed_without_dragging
-                        && nalgebra::distance_squared(&last_button2_pressed_pos, &moved_pos)
-                            >= f64::powi(10., 2)
+                        && last_button2_pressed_pos.distance_squared(moved_pos) >= f64::powi(10., 2)
                     {
                         button2_pressed_without_dragging = false;
                     }
@@ -183,7 +179,7 @@ async fn main() {
         let pressure = simulation.get_thermo("press");
 
         window.draw_ui(|ctx| {
-            TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+            Panel::bottom("bottom_panel").show(ctx, |ui| {
                 Grid::new("stat_grid").num_columns(2).show(ui, |ui| {
                     let mut bar_width = 0.;
 
@@ -281,14 +277,15 @@ async fn main() {
 
         // Update box position in 3D
         let (box_low, box_high) = simulation.extract_box();
-        let (box_low, box_high) = (Point3::from(box_low), Point3::from(box_high));
+        let (box_low, box_high) = (
+            DVec3::from(box_low).as_vec3(),
+            DVec3::from(box_high).as_vec3(),
+        );
 
-        let scale = (box_high - box_low).cast::<f32>();
+        let scale = box_high - box_low;
         box_cuboid.set_local_scale(scale.x, scale.y, scale.z);
 
-        box_cuboid.set_local_translation(
-            Translation3::from(nalgebra::center(&box_low, &box_high)).cast::<f32>(),
-        );
+        box_cuboid.set_position(box_low.midpoint(box_high));
 
         // Update atom positions in 3D
         let positions = unsafe {
@@ -301,37 +298,33 @@ async fn main() {
         };
 
         for (atom_sphere, atom_pos) in atom_spheres.iter_mut().zip(positions) {
-            atom_sphere.set_local_translation(Translation3::from(atom_pos).cast::<f32>());
+            atom_sphere.set_position(DVec3::from(atom_pos).as_vec3());
         }
 
         // Update template sphere in 3D
         if let Some(cursor_pos) = window.cursor_pos() {
-            let (origin, direction) = camera.unproject(
-                &Point2::new(cursor_pos.0, cursor_pos.1).cast::<f32>(),
-                &window.size().cast::<f32>(),
-            );
+            let (origin, direction) =
+                camera.unproject(DVec2::from(cursor_pos).as_vec2(), window.size().as_vec2());
             let cursor_ray = Ray::new(origin, direction);
 
             if template_add_mode {
                 selection = None;
 
                 template_sphere.set_visible(true);
-                template_sphere.set_lines_color(Some(Point3::new(0., 1., 0.)));
-                template_sphere.set_local_translation(Translation3::from(
-                    cursor_ray.point_at(template_distance),
-                ));
+                template_sphere.set_lines_color(Some(color::LIME));
+                template_sphere.set_position(cursor_ray.point_at(template_distance));
             } else {
                 selection = atom_spheres
                     .iter()
                     .filter_map(|atom_sphere| {
-                        Ball::new(atom_sphere.data().local_scale().x / 2.)
+                        Ball::new(atom_sphere.local_scale().x / 2.)
                             .cast_ray(
-                                &atom_sphere.data().local_transformation(),
+                                &atom_sphere.local_transformation(),
                                 &cursor_ray,
                                 camera.clip_planes().1,
                                 true,
                             )
-                            .map(|distance| (atom_sphere.data().local_translation(), distance))
+                            .map(|distance| (atom_sphere.position(), distance))
                     })
                     .min_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap())
                     .map(|(selected_pos, _)| selected_pos);
@@ -339,8 +332,8 @@ async fn main() {
                 match selection {
                     Some(selected_pos) => {
                         template_sphere.set_visible(true);
-                        template_sphere.set_lines_color(Some(Point3::new(1., 0., 0.)));
-                        template_sphere.set_local_translation(selected_pos);
+                        template_sphere.set_lines_color(Some(color::RED));
+                        template_sphere.set_position(selected_pos);
                     }
                     None => {
                         template_sphere.set_visible(false);
@@ -348,5 +341,8 @@ async fn main() {
                 }
             }
         }
+
+        // Update light position in 3D
+        light.set_position(camera.eye());
     }
 }
