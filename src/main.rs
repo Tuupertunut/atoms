@@ -30,18 +30,19 @@ async fn main() {
 
     // Initialize simulation
     let mut simulation = Lammps::open(&["-log", "none"]);
-    simulation.command("units metal");
+    simulation.command("units real");
     simulation.command("dimension 3");
     simulation.command("boundary p p p");
-    simulation.command("atom_style atomic");
+    simulation.command("atom_style charge");
     simulation.command("region box block 0 20 0 20 0 20");
     simulation.command("create_box 1 box");
-    // Using argon mass and Lennard-Jones parameters
-    // https://www.researchgate.net/figure/Lennard-Jones-LJ-potential-parameters-of-different-materials-considered-in-thepresent_tbl2_319412425
-    simulation.command("mass 1 40");
-    simulation.command("pair_style lj/cut 15");
-    simulation.command("pair_coeff 1 1 0.01 3.4");
-    simulation.command("timestep 0.001");
+    // Using oxygen mass and reaxff parameters
+    simulation.command("mass 1 15.999");
+    // Hack: arbitrary values to prevent crashing, use kokkos instead
+    simulation.command("pair_style reaxff NULL safezone 3 mincap 150 minhbonds 150");
+    simulation.command("pair_coeff * * lammps/potentials/acks2_ff.water O");
+    simulation.command("fix 2 all acks2/reaxff 1 0 10 1e-6 reaxff");
+    simulation.command("timestep 1");
 
     // Initialize simulation control parameters
     let mut simulation_running = true;
@@ -91,9 +92,9 @@ async fn main() {
                             simulation.create_atom(1, template_pos, [0., 0., 0.]);
                             let mut atom_sphere = scene.add_sphere(1.);
                             atom_sphere.set_color(Color::new(
-                                0x80 as f32 / 256.,
-                                0xD1 as f32 / 256.,
-                                0xE3 as f32 / 256.,
+                                0xFF as f32 / 256.,
+                                0x0D as f32 / 256.,
+                                0x0D as f32 / 256.,
                                 1.,
                             ));
                             atom_spheres.push(atom_sphere);
@@ -247,7 +248,7 @@ async fn main() {
 
             if thermostat_enabled && barostat_enabled {
                 simulation.command(&format!(
-                    "fix 1 all npt temp {} {} 0.1 iso {} {} 1",
+                    "fix 1 all npt temp {} {} 100 iso {} {} 1000",
                     thermostat_temperature,
                     thermostat_temperature,
                     barostat_pressure,
@@ -255,12 +256,12 @@ async fn main() {
                 ));
             } else if thermostat_enabled {
                 simulation.command(&format!(
-                    "fix 1 all nvt temp {} {} 0.1",
+                    "fix 1 all nvt temp {} {} 100",
                     thermostat_temperature, thermostat_temperature
                 ));
             } else if barostat_enabled {
                 simulation.command(&format!(
-                    "fix 1 all nph iso {} {} 1",
+                    "fix 1 all nph iso {} {} 1000",
                     barostat_pressure, barostat_pressure
                 ));
             } else {

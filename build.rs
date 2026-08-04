@@ -4,13 +4,13 @@ fn main() {
     // Build lammps with cmake
     let lammps_build_dir = cmake::Config::new("lammps/cmake")
         .define("BUILD_MPI", "no")
-        // TODO: is OpenMP needed?
-        .define("BUILD_OMP", "yes")
+        .define("BUILD_OMP", "no")
         .define("WITH_JPEG", "no")
         .define("WITH_PNG", "no")
         .define("WITH_FFMPEG", "no")
         .define("WITH_GZIP", "no")
         .define("WITH_CURL", "no")
+        .define("PKG_REAXFF", "yes")
         .build();
 
     // Tell cargo to look for libraries in the specified directory
@@ -22,7 +22,6 @@ fn main() {
     // Tell cargo to tell rustc to link the `lammps` library. Cargo will
     // automatically know it must look for a `liblammps.a` file.
     println!("cargo:rustc-link-lib=static=lammps");
-    println!("cargo:rustc-link-lib=static=gomp");
     println!("cargo:rustc-link-lib=static=stdc++");
 
     // The bindgen::Builder is the main entry point
