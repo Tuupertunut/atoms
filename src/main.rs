@@ -40,7 +40,7 @@ async fn main() {
     simulation.command("mass 1 15.999");
     // Hack: arbitrary values to prevent crashing, use kokkos instead
     simulation.command("pair_style reaxff NULL safezone 3 mincap 150 minhbonds 150");
-    simulation.command("pair_coeff * * lammps/potentials/acks2_ff.water O");
+    simulation.command("pair_coeff * * ffield.reax.chon2019 O");
     simulation.command("fix 2 all acks2/reaxff 1 0 10 1e-6 reaxff");
     simulation.command("timestep 1");
 
