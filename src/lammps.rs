@@ -39,10 +39,6 @@ impl Lammps {
         unsafe { lammps_command(self.session, CString::new(command).unwrap().as_ptr()) };
     }
 
-    pub fn get_natoms(&self) -> usize {
-        return unsafe { lammps_get_natoms(self.session) } as usize;
-    }
-
     pub fn extract_atom(&self, property: &str) -> *const c_void {
         return unsafe {
             lammps_extract_atom(self.session, CString::new(property).unwrap().as_ptr())
@@ -77,19 +73,6 @@ impl Lammps {
                 &velocity as *const f64,
                 std::ptr::null(),
                 0,
-            )
-        };
-    }
-
-    pub fn reset_box(&mut self, box_low: [f64; 3], box_high: [f64; 3]) {
-        unsafe {
-            lammps_reset_box(
-                self.session,
-                &box_low as *const f64 as *mut f64,
-                &box_high as *const f64 as *mut f64,
-                0.,
-                0.,
-                0.,
             )
         };
     }
