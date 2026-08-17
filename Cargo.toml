@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 kiss3d = { version = "0.45.1", features = ["egui"] }
-parry3d = "0.29.0"
+parry3d = "0.30.2"
 
 [build-dependencies]
 bindgen = "0.72.1"
