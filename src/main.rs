@@ -13,9 +13,34 @@ use parry3d::{
     query::{Ray, RayCast},
     shape::Ball,
 };
-use std::slice;
+use std::{ffi::c_int, slice};
 
 mod lammps;
+
+/// Jmol atom colors for H,C,N,O
+fn atom_color(atom_type: i32) -> Color {
+    let (r, g, b) = match atom_type {
+        1 => (0xFF, 0xFF, 0xFF),
+        2 => (0x90, 0x90, 0x90),
+        3 => (0x30, 0x50, 0xF8),
+        4 => (0xFF, 0x0D, 0x0D),
+        _ => unreachable!(),
+    };
+    return Color::new(r as f32 / 256., g as f32 / 256., b as f32 / 256., 1.);
+}
+
+/// Covalent atom radii for H,C,N,O from Wikipedia table, times 1.5 because it looks good
+/// https://en.wikipedia.org/wiki/Covalent_radius
+fn atom_radius(atom_type: i32) -> f32 {
+    let radius = match atom_type {
+        1 => 0.31,
+        2 => 0.76,
+        3 => 0.71,
+        4 => 0.66,
+        _ => unreachable!(),
+    };
+    return radius * 1.5;
+}
 
 #[kiss3d::main]
 async fn main() {
@@ -35,14 +60,17 @@ async fn main() {
     simulation.command("boundary p p p");
     simulation.command("atom_style charge");
     simulation.command("region box block 0 20 0 20 0 20");
-    simulation.command("create_box 1 box");
-    // Using oxygen mass and reaxff parameters
-    simulation.command("mass 1 15.999");
+    simulation.command("create_box 4 box");
+    // Using H,C,N,O mass and reaxff parameters
+    simulation.command("mass 1 1.008");
+    simulation.command("mass 2 12");
+    simulation.command("mass 3 14");
+    simulation.command("mass 4 15.999");
     // Hack: arbitrary values to prevent crashing, use kokkos instead
     simulation.command("pair_style reaxff NULL safezone 3 mincap 150 minhbonds 150");
-    simulation.command("pair_coeff * * ffield.reax.chon2019 O");
+    simulation.command("pair_coeff * * ffield.reax.chon2019 H C N O");
     simulation.command("fix 2 all qeq/reaxff 1 0 10 1e-6 reaxff");
-    simulation.command("timestep 1");
+    simulation.command("timestep 0.2");
 
     // Initialize simulation control parameters
     let mut simulation_running = true;
@@ -62,12 +90,13 @@ async fn main() {
     let mut atom_spheres = Vec::<SceneNode3d>::new();
 
     // Initialize template sphere, the temporary sphere to display when adding/deleting atoms
-    let mut template_sphere = scene.add_sphere(1.);
+    let mut template_sphere = scene.add_sphere(0.);
     template_sphere.set_surface_rendering_activation(false);
     template_sphere.set_lines_width(0.5, false);
 
     let mut template_add_mode = false;
     let mut template_distance = 30.;
+    let mut template_atom_type = 1;
     let mut selection = Option::<Vec3>::None;
 
     // Initialize button drag monitoring
@@ -89,15 +118,8 @@ async fn main() {
                         if template_add_mode {
                             // Add new atom
                             let template_pos = template_sphere.position().as_dvec3().to_array();
-                            simulation.create_atom(1, template_pos, [0., 0., 0.]);
-                            let mut atom_sphere = scene.add_sphere(1.);
-                            atom_sphere.set_color(Color::new(
-                                0xFF as f32 / 256.,
-                                0x0D as f32 / 256.,
-                                0x0D as f32 / 256.,
-                                1.,
-                            ));
-                            atom_spheres.push(atom_sphere);
+                            simulation.create_atom(template_atom_type, template_pos, [0., 0., 0.]);
+                            atom_spheres.push(scene.add_sphere(0.));
 
                             template_add_mode = false;
                         } else {
@@ -108,7 +130,7 @@ async fn main() {
                                 // practice the region is so small that there is always only that
                                 // one atom in it.
                                 simulation.command(&format!(
-                                    "region temp sphere {} {} {} 0.01",
+                                    "region temp sphere {} {} {} 0.001",
                                     selected_pos.x, selected_pos.y, selected_pos.z
                                 ));
                                 simulation.command("delete_atoms region temp");
@@ -139,6 +161,27 @@ async fn main() {
                     if !window.is_egui_capturing_keyboard() =>
                 {
                     simulation_running = !simulation_running;
+                }
+
+                WindowEvent::Key(Key::Key1, Action::Press, _)
+                    if !window.is_egui_capturing_keyboard() =>
+                {
+                    template_atom_type = 1;
+                }
+                WindowEvent::Key(Key::Key2, Action::Press, _)
+                    if !window.is_egui_capturing_keyboard() =>
+                {
+                    template_atom_type = 2;
+                }
+                WindowEvent::Key(Key::Key3, Action::Press, _)
+                    if !window.is_egui_capturing_keyboard() =>
+                {
+                    template_atom_type = 3;
+                }
+                WindowEvent::Key(Key::Key4, Action::Press, _)
+                    if !window.is_egui_capturing_keyboard() =>
+                {
+                    template_atom_type = 4;
                 }
 
                 // Update button drag monitoring. Some actions should only happen when buttons are
@@ -289,17 +332,36 @@ async fn main() {
         box_cuboid.set_position(box_low.midpoint(box_high));
 
         // Update atom positions in 3D
-        let positions = unsafe {
-            slice::from_raw_parts(
+        // Safety:
+        // 1. Lammps documentation tells the types of "x" and "type" so they are safe to
+        //    dereference.
+        // 2. We always push created atoms and pop deleted atoms from atom_spheres, and lammps never
+        //    changes the atom count by itself, so the length of atom_spheres is also the number of
+        //    atoms in the simulation.
+        // 3. There must not be any mutable accesses to simulation before the iterators are dropped.
+        unsafe {
+            let positions = slice::from_raw_parts(
                 simulation.extract_atom("x") as *const *const [f64; 3],
                 atom_spheres.len(),
             )
             .iter()
-            .map(|&ptr| *ptr)
-        };
+            .map(|&ptr| *ptr);
 
-        for (atom_sphere, atom_pos) in atom_spheres.iter_mut().zip(positions) {
-            atom_sphere.set_position(DVec3::from(atom_pos).as_vec3());
+            let types = slice::from_raw_parts(
+                simulation.extract_atom("type") as *const c_int,
+                atom_spheres.len(),
+            )
+            .iter()
+            .map(|&i| i as i32);
+
+            for (atom_sphere, (atom_pos, atom_type)) in
+                atom_spheres.iter_mut().zip(positions.zip(types))
+            {
+                atom_sphere.set_position(DVec3::from(atom_pos).as_vec3());
+                atom_sphere.set_color(atom_color(atom_type));
+                let scale = atom_radius(atom_type) * 2.;
+                atom_sphere.set_local_scale(scale, scale, scale);
+            }
         }
 
         // Update template sphere in 3D
@@ -314,8 +376,11 @@ async fn main() {
                 template_sphere.set_visible(true);
                 template_sphere.set_lines_color(Some(color::LIME));
                 template_sphere.set_position(cursor_ray.point_at(template_distance));
+                let scale = atom_radius(template_atom_type) * 2.;
+                template_sphere.set_local_scale(scale, scale, scale);
             } else {
-                selection = atom_spheres
+                // Ray tracing to find which sphere the cursor is pointing at
+                let sphere_selection = atom_spheres
                     .iter()
                     .filter_map(|atom_sphere| {
                         Ball::new(atom_sphere.local_scale().x / 2.)
@@ -325,16 +390,19 @@ async fn main() {
                                 camera.clip_planes().1,
                                 true,
                             )
-                            .map(|distance| (atom_sphere.position(), distance))
+                            .map(|distance| (atom_sphere, distance))
                     })
-                    .min_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap())
-                    .map(|(selected_pos, _)| selected_pos);
+                    .min_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap());
 
-                match selection {
-                    Some(selected_pos) => {
+                selection = sphere_selection.map(|(selected_sphere, _)| selected_sphere.position());
+
+                match sphere_selection {
+                    Some((selected_sphere, _)) => {
                         template_sphere.set_visible(true);
                         template_sphere.set_lines_color(Some(color::RED));
-                        template_sphere.set_position(selected_pos);
+                        template_sphere.set_position(selected_sphere.position());
+                        let scale = selected_sphere.local_scale().x;
+                        template_sphere.set_local_scale(scale, scale, scale);
                     }
                     None => {
                         template_sphere.set_visible(false);
