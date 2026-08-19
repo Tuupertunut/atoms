@@ -41,6 +41,21 @@ fn atom_radius(atom_type: i32) -> f32 {
     return radius * 1.5;
 }
 
+/// Deletes a single atom which is closest to given position. Lammps doesn't have any native way to
+/// delete just one atom, only all atoms in a region, so we have to implement it ourselves using
+/// atom IDs. Unsafe when given atom count is too high.
+unsafe fn delete_closest_atom(simulation: &mut Lammps, atom_count: usize, pos: DVec3) {
+    let ids = unsafe { simulation.extract_atom_id(atom_count) };
+    let positions = unsafe { simulation.extract_atom_x(atom_count) };
+    let (closest_id, _) = ids
+        .zip(positions.map(|atom_pos| DVec3::from(atom_pos).distance_squared(pos)))
+        .min_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap())
+        .unwrap();
+    simulation.command(&format!("group temp id {}", closest_id));
+    simulation.command("delete_atoms group temp");
+    simulation.command("group temp delete");
+}
+
 #[kiss3d::main]
 async fn main() {
     // Initialize window
@@ -124,16 +139,18 @@ async fn main() {
                         } else {
                             if let Some(selected_pos) = selection {
                                 // Delete atom
-                                // Lammps does not directly allow deleting a single atom, so create
-                                // a temporary region around it and delete everything inside it. In
-                                // practice the region is so small that there is always only that
-                                // one atom in it.
-                                simulation.command(&format!(
-                                    "region temp sphere {} {} {} 0.001",
-                                    selected_pos.x, selected_pos.y, selected_pos.z
-                                ));
-                                simulation.command("delete_atoms region temp");
-                                simulation.command("region temp delete");
+                                // Safety:
+                                // We always push created atoms and pop deleted atoms from
+                                // atom_spheres, and lammps never changes the atom count by itself,
+                                // so the length of atom_spheres is also the number of atoms in the
+                                // simulation.
+                                unsafe {
+                                    delete_closest_atom(
+                                        &mut simulation,
+                                        atom_spheres.len(),
+                                        selected_pos.as_dvec3(),
+                                    );
+                                }
                                 atom_spheres.pop().unwrap().remove();
                             }
                         }

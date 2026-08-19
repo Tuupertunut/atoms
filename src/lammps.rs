@@ -61,6 +61,14 @@ impl Lammps {
         };
     }
 
+    pub unsafe fn extract_atom_id(&self, size: usize) -> impl Iterator<Item = u32> + '_ {
+        return unsafe {
+            slice::from_raw_parts(self.extract_atom("id") as *const u32, size)
+                .iter()
+                .copied()
+        };
+    }
+
     pub fn extract_box(&self) -> ([f64; 3], [f64; 3]) {
         let mut box_bounds = ([0.; 3], [0.; 3]);
         unsafe {
