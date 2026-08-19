@@ -13,7 +13,6 @@ use parry3d::{
     query::{Ray, RayCast},
     shape::Ball,
 };
-use std::{ffi::c_int, slice};
 
 mod lammps;
 
@@ -333,35 +332,19 @@ async fn main() {
 
         // Update atom positions in 3D
         // Safety:
-        // 1. Lammps documentation tells the types of "x" and "type" so they are safe to
-        //    dereference.
-        // 2. We always push created atoms and pop deleted atoms from atom_spheres, and lammps never
-        //    changes the atom count by itself, so the length of atom_spheres is also the number of
-        //    atoms in the simulation.
-        // 3. There must not be any mutable accesses to simulation before the iterators are dropped.
-        unsafe {
-            let positions = slice::from_raw_parts(
-                simulation.extract_atom("x") as *const *const [f64; 3],
-                atom_spheres.len(),
-            )
-            .iter()
-            .map(|&ptr| *ptr);
+        // We always push created atoms and pop deleted atoms from atom_spheres, and lammps never
+        // changes the atom count by itself, so the length of atom_spheres is also the number of
+        // atoms in the simulation.
+        let positions = unsafe { simulation.extract_atom_x(atom_spheres.len()) };
+        let types = unsafe { simulation.extract_atom_type(atom_spheres.len()) };
 
-            let types = slice::from_raw_parts(
-                simulation.extract_atom("type") as *const c_int,
-                atom_spheres.len(),
-            )
-            .iter()
-            .map(|&i| i as i32);
-
-            for (atom_sphere, (atom_pos, atom_type)) in
-                atom_spheres.iter_mut().zip(positions.zip(types))
-            {
-                atom_sphere.set_position(DVec3::from(atom_pos).as_vec3());
-                atom_sphere.set_color(atom_color(atom_type));
-                let scale = atom_radius(atom_type) * 2.;
-                atom_sphere.set_local_scale(scale, scale, scale);
-            }
+        for (atom_sphere, (atom_pos, atom_type)) in
+            atom_spheres.iter_mut().zip(positions.zip(types))
+        {
+            atom_sphere.set_position(DVec3::from(atom_pos).as_vec3());
+            atom_sphere.set_color(atom_color(atom_type));
+            let scale = atom_radius(atom_type) * 2.;
+            atom_sphere.set_local_scale(scale, scale, scale);
         }
 
         // Update template sphere in 3D

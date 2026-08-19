@@ -1,7 +1,7 @@
 use lammps_sys::*;
 use std::{
     ffi::{CString, c_char, c_int, c_void},
-    iter, ptr,
+    iter, ptr, slice,
 };
 
 /// Lammps C API bindings generated from library.h
@@ -39,9 +39,25 @@ impl Lammps {
         unsafe { lammps_command(self.session, CString::new(command).unwrap().as_ptr()) };
     }
 
-    pub fn extract_atom(&self, property: &str) -> *const c_void {
+    pub unsafe fn extract_atom(&self, property: &str) -> *const c_void {
         return unsafe {
             lammps_extract_atom(self.session, CString::new(property).unwrap().as_ptr())
+        };
+    }
+
+    pub unsafe fn extract_atom_x(&self, size: usize) -> impl Iterator<Item = [f64; 3]> + '_ {
+        return unsafe {
+            slice::from_raw_parts(self.extract_atom("x") as *const *const [f64; 3], size)
+                .iter()
+                .map(|&ptr| *ptr)
+        };
+    }
+
+    pub unsafe fn extract_atom_type(&self, size: usize) -> impl Iterator<Item = i32> + '_ {
+        return unsafe {
+            slice::from_raw_parts(self.extract_atom("type") as *const c_int, size)
+                .iter()
+                .map(|&i| i as i32)
         };
     }
 
