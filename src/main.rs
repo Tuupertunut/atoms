@@ -307,7 +307,7 @@ async fn main() {
 
             if thermostat_enabled && barostat_enabled {
                 simulation.command(&format!(
-                    "fix 1 all npt temp {} {} 100 iso {} {} 1000",
+                    "fix 1 all npt temp {} {} 200 iso {} {} 1000",
                     thermostat_temperature,
                     thermostat_temperature,
                     barostat_pressure,
@@ -315,7 +315,7 @@ async fn main() {
                 ));
             } else if thermostat_enabled {
                 simulation.command(&format!(
-                    "fix 1 all nvt temp {} {} 100",
+                    "fix 1 all nvt temp {} {} 200",
                     thermostat_temperature, thermostat_temperature
                 ));
             } else if barostat_enabled {
