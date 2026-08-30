@@ -1,14 +1,8 @@
-kiss3d
-- good first person camera
-  - scroll wheel adjust movement speed??
-hydrogen oxygen
-universal force field
+good first person camera
+- scroll wheel adjust movement speed??
 quantum potential
 multithreading openmp threads
-add atoms by clicking
-- numbers select atom type
-  - atom bar or periodic table on ui
-- first person camera
+atom bar or periodic table on ui
 adjust time speed
 - maybe slider
 adjust box size
@@ -19,3 +13,5 @@ adjust temperature and pressure
 ui legend
 adjust thermostat and barostat time
 slider dragvalue field double typing
+clean slider ui
+- show measurement bars over slider limit

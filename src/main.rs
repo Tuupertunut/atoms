@@ -253,11 +253,14 @@ async fn main() {
                         // the second column before this point.
                         bar_width = f32::max(0., ui.available_width() - 80.);
 
-                        let max_temperature = 1200.;
+                        let max_temperature: f64 = 10000.;
+                        let min_nonzero_temperature = 0.1;
 
                         ui.spacing_mut().slider_width = bar_width;
                         let slider = ui.add(
                             Slider::new(&mut thermostat_temperature, 0.0..=max_temperature)
+                                .logarithmic(true)
+                                .smallest_positive(min_nonzero_temperature)
                                 .suffix(" K"),
                         );
                         if slider.changed() {
@@ -265,9 +268,13 @@ async fn main() {
                         }
 
                         ui.add(
-                            ProgressBar::new((temperature / max_temperature) as f32)
-                                .desired_width(bar_width)
-                                .text(format!("{:.2} K", temperature)),
+                            ProgressBar::new(
+                                ((temperature.log2() - min_nonzero_temperature.log2())
+                                    / (max_temperature.log2() - min_nonzero_temperature.log2()))
+                                    as f32,
+                            )
+                            .desired_width(bar_width)
+                            .text(format!("{:.2} K", temperature)),
                         );
                     });
 
@@ -279,20 +286,28 @@ async fn main() {
                     }
 
                     ui.vertical(|ui| {
-                        let max_pressure = 1200.;
+                        let max_pressure: f64 = 10000.;
+                        let min_nonzero_pressure = 0.1;
 
                         ui.spacing_mut().slider_width = bar_width;
                         let slider = ui.add(
-                            Slider::new(&mut barostat_pressure, 0.0..=max_pressure).suffix(" bar"),
+                            Slider::new(&mut barostat_pressure, 0.0..=max_pressure)
+                                .logarithmic(true)
+                                .smallest_positive(min_nonzero_pressure)
+                                .suffix(" bar"),
                         );
                         if slider.changed() {
                             ensemble_changed = true;
                         }
 
                         ui.add(
-                            ProgressBar::new((pressure / max_pressure) as f32)
-                                .desired_width(bar_width)
-                                .text(format!("{:.2} bar", pressure)),
+                            ProgressBar::new(
+                                ((pressure.log2() - min_nonzero_pressure.log2())
+                                    / (max_pressure.log2() - min_nonzero_pressure.log2()))
+                                    as f32,
+                            )
+                            .desired_width(bar_width)
+                            .text(format!("{:.2} bar", pressure)),
                         );
                     });
 
