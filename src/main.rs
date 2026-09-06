@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use kiss3d::{
     camera::{Camera3d, OrbitCamera3d},
     color::{self, Color},
@@ -13,33 +14,90 @@ use parry3d::{
     query::{Ray, RayCast},
     shape::Ball,
 };
+use strum::{EnumIter, FromRepr, IntoEnumIterator};
 
 mod lammps;
 
-/// Jmol atom colors for H,C,N,O
-fn atom_color(atom_type: i32) -> Color {
-    let (r, g, b) = match atom_type {
-        1 => (0xFF, 0xFF, 0xFF),
-        2 => (0x90, 0x90, 0x90),
-        3 => (0x30, 0x50, 0xF8),
-        4 => (0xFF, 0x0D, 0x0D),
-        _ => unreachable!(),
-    };
-    return Color::new(r as f32 / 256., g as f32 / 256., b as f32 / 256., 1.);
+#[derive(Clone, Copy, FromRepr, EnumIter)]
+enum AtomType {
+    H = 1,
+    C = 2,
+    N = 3,
+    O = 4,
 }
 
-/// Covalent atom radii for H,C,N,O from Wikipedia table, times 1.5 because it looks good
-/// https://en.wikipedia.org/wiki/Covalent_radius
-fn atom_radius(atom_type: i32) -> f32 {
-    let radius = match atom_type {
-        1 => 0.31,
-        2 => 0.76,
-        3 => 0.71,
-        4 => 0.66,
-        _ => unreachable!(),
-    };
-    return radius * 1.5;
+impl AtomType {
+    fn symbol(self) -> &'static str {
+        return match self {
+            Self::H => "H",
+            Self::C => "C",
+            Self::N => "N",
+            Self::O => "O",
+        };
+    }
+
+    /// Mass in atomic mass units
+    fn mass(self) -> f64 {
+        return match self {
+            Self::H => 1.008,
+            Self::C => 12.,
+            Self::N => 14.,
+            Self::O => 15.999,
+        };
+    }
+
+    /// Jmol atom colors
+    fn color(self) -> Color {
+        let (r, g, b) = match self {
+            Self::H => (0xFF, 0xFF, 0xFF),
+            Self::C => (0x90, 0x90, 0x90),
+            Self::N => (0x30, 0x50, 0xF8),
+            Self::O => (0xFF, 0x0D, 0x0D),
+        };
+        return Color::new(r as f32 / 256., g as f32 / 256., b as f32 / 256., 1.);
+    }
+
+    /// Covalent atom radii in angstroms from Wikipedia table, times 1.5 because it looks good
+    /// https://en.wikipedia.org/wiki/Covalent_radius
+    fn radius(self) -> f32 {
+        let radius = match self {
+            Self::H => 0.31,
+            Self::C => 0.76,
+            Self::N => 0.71,
+            Self::O => 0.66,
+        };
+        return radius * 1.5;
+    }
+
+    /// Keyboard key for selecting this atom type
+    fn hotkey(self) -> Key {
+        return match self {
+            Self::H => Key::Key1,
+            Self::C => Key::Key2,
+            Self::N => Key::Key3,
+            Self::O => Key::Key4,
+        };
+    }
 }
+
+/// In femtoseconds
+const TIMESTEP: f64 = 0.2;
+const STEPS_PER_FRAME: u32 = 50;
+/// In angstroms
+const INITIAL_BOX_SIZE: f64 = 20.;
+/// In femtoseconds
+const THERMOSTAT_TIME_SCALE: f64 = 200.;
+/// In femtoseconds
+const BAROSTAT_TIME_SCALE: f64 = 1000.;
+
+/// In kelvins
+const THERMOSTAT_MAX_TEMP: f64 = 10000.;
+/// In kelvins
+const THERMOSTAT_MIN_NONZERO_TEMP: f64 = 0.1;
+/// In atmospheres
+const BAROSTAT_MAX_PRESS: f64 = 10000.;
+/// In atmospheres
+const BAROSTAT_MIN_NONZERO_PRESS: f64 = 0.1;
 
 /// Deletes a single atom which is closest to given position. Lammps doesn't have any native way to
 /// delete just one atom, only all atoms in a region, so we have to implement it ourselves using
@@ -50,7 +108,7 @@ unsafe fn delete_closest_atom(simulation: &mut Lammps, atom_count: usize, pos: D
     let (closest_id, _) = ids
         .zip(positions.map(|atom_pos| DVec3::from(atom_pos).distance_squared(pos)))
         .min_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap())
-        .unwrap();
+        .expect("there should be atoms when deleting one");
     simulation.command(&format!("group temp id {}", closest_id));
     simulation.command("delete_atoms group temp");
     simulation.command("group temp delete");
@@ -61,7 +119,7 @@ async fn main() {
     // Initialize window
     let mut window = Window::new_with_size("Atoms", 1000, 800).await;
 
-    let mut camera = OrbitCamera3d::new(Vec3::new(10., 10., -20.), Vec3::new(10., 10., 10.));
+    let mut camera = OrbitCamera3d::new(Vec3::new(0., 0., -30.), Vec3::ZERO);
     camera.set_dist_step(0.99);
 
     let mut scene = SceneNode3d::empty();
@@ -73,18 +131,36 @@ async fn main() {
     simulation.command("dimension 3");
     simulation.command("boundary p p p");
     simulation.command("atom_style charge");
-    simulation.command("region box block 0 20 0 20 0 20");
-    simulation.command("create_box 4 box");
-    // Using H,C,N,O mass and reaxff parameters
-    simulation.command("mass 1 1.008");
-    simulation.command("mass 2 12");
-    simulation.command("mass 3 14");
-    simulation.command("mass 4 15.999");
-    // Hack: arbitrary values to prevent crashing, use kokkos instead
+    simulation.command(&format!("timestep {}", TIMESTEP));
+
+    // Initialize simulation box
+    simulation.command(&format!(
+        "region box block {} {} {} {} {} {}",
+        -INITIAL_BOX_SIZE / 2.,
+        INITIAL_BOX_SIZE / 2.,
+        -INITIAL_BOX_SIZE / 2.,
+        INITIAL_BOX_SIZE / 2.,
+        -INITIAL_BOX_SIZE / 2.,
+        INITIAL_BOX_SIZE / 2.,
+    ));
+    simulation.command(&format!("create_box {} box", AtomType::iter().len()));
+
+    // Initialize simulation atom types and force field
+    for atom_type in AtomType::iter() {
+        simulation.command(&format!("mass {} {}", atom_type as i32, atom_type.mass()));
+    }
+    // Hack: arbitrary values to prevent crashing, kokkos should be better but it crashes even
+    // faster
     simulation.command("pair_style reaxff NULL safezone 5 mincap 300 minhbonds 300");
-    simulation.command("pair_coeff * * ffield.reax.chon2019 H C N O");
+    // Using CHON-2019 ReaxFF force field from Kowalik et al.
+    // https://doi.org/10.1021/acs.jpcb.9b04298
+    simulation.command(&format!(
+        "pair_coeff * * ffield.reax.chon2019 {}",
+        AtomType::iter()
+            .map(|atom_type| atom_type.symbol())
+            .join(" ")
+    ));
     simulation.command("fix 2 all qeq/reaxff 1 0 10 1e-6 reaxff");
-    simulation.command("timestep 0.2");
 
     // Initialize simulation control parameters
     let mut simulation_running = true;
@@ -110,7 +186,7 @@ async fn main() {
 
     let mut template_add_mode = false;
     let mut template_distance = 30.;
-    let mut template_atom_type = 1;
+    let mut template_atom_type = AtomType::H;
     let mut selection = Option::<Vec3>::None;
 
     // Initialize button drag monitoring
@@ -132,7 +208,11 @@ async fn main() {
                         if template_add_mode {
                             // Add new atom
                             let template_pos = template_sphere.position().as_dvec3().to_array();
-                            simulation.create_atom(template_atom_type, template_pos, [0., 0., 0.]);
+                            simulation.create_atom(
+                                template_atom_type as i32,
+                                template_pos,
+                                [0., 0., 0.],
+                            );
                             atom_spheres.push(scene.add_sphere(0.));
 
                             template_add_mode = false;
@@ -179,29 +259,18 @@ async fn main() {
                     simulation_running = !simulation_running;
                 }
 
-                WindowEvent::Key(Key::Key1, Action::Press, _)
-                    if !window.is_egui_capturing_keyboard() =>
-                {
-                    template_atom_type = 1;
-                }
-                WindowEvent::Key(Key::Key2, Action::Press, _)
-                    if !window.is_egui_capturing_keyboard() =>
-                {
-                    template_atom_type = 2;
-                }
-                WindowEvent::Key(Key::Key3, Action::Press, _)
-                    if !window.is_egui_capturing_keyboard() =>
-                {
-                    template_atom_type = 3;
-                }
-                WindowEvent::Key(Key::Key4, Action::Press, _)
-                    if !window.is_egui_capturing_keyboard() =>
-                {
-                    template_atom_type = 4;
+                WindowEvent::Key(key, Action::Press, _) if !window.is_egui_capturing_keyboard() => {
+                    for atom_type in AtomType::iter() {
+                        if atom_type.hotkey() == key {
+                            template_atom_type = atom_type;
+                            break;
+                        }
+                    }
                 }
 
                 // Update button drag monitoring. Some actions should only happen when buttons are
-                // clicked without dragging so we keep track of it.
+                // clicked without dragging so we keep track of it. Button is considered dragged
+                // when it moves more than 10 pixels
                 WindowEvent::MouseButton(MouseButton::Button1, Action::Press, _)
                     if !window.is_egui_capturing_mouse() =>
                 {
@@ -253,14 +322,11 @@ async fn main() {
                         // the second column before this point.
                         bar_width = f32::max(0., ui.available_width() - 80.);
 
-                        let max_temperature: f64 = 10000.;
-                        let min_nonzero_temperature = 0.1;
-
                         ui.spacing_mut().slider_width = bar_width;
                         let slider = ui.add(
-                            Slider::new(&mut thermostat_temperature, 0.0..=max_temperature)
+                            Slider::new(&mut thermostat_temperature, 0.0..=THERMOSTAT_MAX_TEMP)
                                 .logarithmic(true)
-                                .smallest_positive(min_nonzero_temperature)
+                                .smallest_positive(THERMOSTAT_MIN_NONZERO_TEMP)
                                 .suffix(" K"),
                         );
                         if slider.changed() {
@@ -269,8 +335,9 @@ async fn main() {
 
                         ui.add(
                             ProgressBar::new(
-                                ((temperature.log2() - min_nonzero_temperature.log2())
-                                    / (max_temperature.log2() - min_nonzero_temperature.log2()))
+                                ((temperature.log2() - THERMOSTAT_MIN_NONZERO_TEMP.log2())
+                                    / (THERMOSTAT_MAX_TEMP.log2()
+                                        - THERMOSTAT_MIN_NONZERO_TEMP.log2()))
                                     as f32,
                             )
                             .desired_width(bar_width)
@@ -286,15 +353,12 @@ async fn main() {
                     }
 
                     ui.vertical(|ui| {
-                        let max_pressure: f64 = 10000.;
-                        let min_nonzero_pressure = 0.1;
-
                         ui.spacing_mut().slider_width = bar_width;
                         let slider = ui.add(
-                            Slider::new(&mut barostat_pressure, 0.0..=max_pressure)
+                            Slider::new(&mut barostat_pressure, 0.0..=BAROSTAT_MAX_PRESS)
                                 .logarithmic(true)
-                                .smallest_positive(min_nonzero_pressure)
-                                .suffix(" bar"),
+                                .smallest_positive(BAROSTAT_MIN_NONZERO_PRESS)
+                                .suffix(" atm"),
                         );
                         if slider.changed() {
                             ensemble_changed = true;
@@ -302,12 +366,13 @@ async fn main() {
 
                         ui.add(
                             ProgressBar::new(
-                                ((pressure.log2() - min_nonzero_pressure.log2())
-                                    / (max_pressure.log2() - min_nonzero_pressure.log2()))
+                                ((pressure.log2() - BAROSTAT_MIN_NONZERO_PRESS.log2())
+                                    / (BAROSTAT_MAX_PRESS.log2()
+                                        - BAROSTAT_MIN_NONZERO_PRESS.log2()))
                                     as f32,
                             )
                             .desired_width(bar_width)
-                            .text(format!("{:.2} bar", pressure)),
+                            .text(format!("{:.2} atm", pressure)),
                         );
                     });
 
@@ -322,21 +387,23 @@ async fn main() {
 
             if thermostat_enabled && barostat_enabled {
                 simulation.command(&format!(
-                    "fix 1 all npt temp {} {} 200 iso {} {} 1000",
+                    "fix 1 all npt temp {} {} {} iso {} {} {}",
                     thermostat_temperature,
                     thermostat_temperature,
+                    THERMOSTAT_TIME_SCALE,
                     barostat_pressure,
-                    barostat_pressure
+                    barostat_pressure,
+                    BAROSTAT_TIME_SCALE,
                 ));
             } else if thermostat_enabled {
                 simulation.command(&format!(
-                    "fix 1 all nvt temp {} {} 200",
-                    thermostat_temperature, thermostat_temperature
+                    "fix 1 all nvt temp {} {} {}",
+                    thermostat_temperature, thermostat_temperature, THERMOSTAT_TIME_SCALE
                 ));
             } else if barostat_enabled {
                 simulation.command(&format!(
-                    "fix 1 all nph iso {} {} 1000",
-                    barostat_pressure, barostat_pressure
+                    "fix 1 all nph iso {} {} {}",
+                    barostat_pressure, barostat_pressure, BAROSTAT_TIME_SCALE
                 ));
             } else {
                 simulation.command("fix 1 all nve");
@@ -347,7 +414,7 @@ async fn main() {
 
         // Run simulation one frame forward
         if simulation_running {
-            simulation.command("run 50");
+            simulation.command(&format!("run {}", STEPS_PER_FRAME));
         }
 
         // Update box position in 3D
@@ -374,8 +441,10 @@ async fn main() {
             atom_spheres.iter_mut().zip(positions.zip(types))
         {
             atom_sphere.set_position(DVec3::from(atom_pos).as_vec3());
-            atom_sphere.set_color(atom_color(atom_type));
-            let scale = atom_radius(atom_type) * 2.;
+            let atom_type = AtomType::from_repr(atom_type as usize)
+                .expect("lammps should not return unknown atom types");
+            atom_sphere.set_color(atom_type.color());
+            let scale = atom_type.radius() * 2.;
             atom_sphere.set_local_scale(scale, scale, scale);
         }
 
@@ -391,7 +460,7 @@ async fn main() {
                 template_sphere.set_visible(true);
                 template_sphere.set_lines_color(Some(color::LIME));
                 template_sphere.set_position(cursor_ray.point_at(template_distance));
-                let scale = atom_radius(template_atom_type) * 2.;
+                let scale = template_atom_type.radius() * 2.;
                 template_sphere.set_local_scale(scale, scale, scale);
             } else {
                 // Ray tracing to find which sphere the cursor is pointing at
