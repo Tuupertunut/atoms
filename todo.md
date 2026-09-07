@@ -13,7 +13,6 @@ adjust thermostat and barostat time
 slider dragvalue field double typing
 clean slider ui
 - show measurement bars over slider limit
-package reaxff file with program
 translate box
 - should not change physics of the box at all
 - maybe with the pan camera controls

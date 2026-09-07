@@ -442,6 +442,7 @@ dependencies = [
  "kiss3d",
  "parry3d",
  "strum",
+ "tempfile",
 ]
 
 [[package]]

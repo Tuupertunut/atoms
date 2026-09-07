@@ -14,7 +14,9 @@ use parry3d::{
     query::{Ray, RayCast},
     shape::Ball,
 };
+use std::io::Write;
 use strum::{EnumIter, FromRepr, IntoEnumIterator};
+use tempfile::{NamedTempFile, TempPath};
 
 mod lammps;
 
@@ -99,6 +101,19 @@ const BAROSTAT_MAX_PRESS: f64 = 10000.;
 /// In atmospheres
 const BAROSTAT_MIN_NONZERO_PRESS: f64 = 0.1;
 
+/// Using CHON-2019 ReaxFF force field from Kowalik et al. https://doi.org/10.1021/acs.jpcb.9b04298
+const FORCE_FIELD_FILE: &str = include_str!("../ffield.reax.chon2019");
+
+/// Create a temporary file with the force field file contents in it and return a path to it. The
+/// file will be deleted when this path is dropped.
+fn force_field_path() -> TempPath {
+    let mut temp_file = NamedTempFile::new().expect("temporary file should be created");
+    temp_file
+        .write_all(FORCE_FIELD_FILE.as_bytes())
+        .expect("temporary file should be written");
+    return temp_file.into_temp_path();
+}
+
 /// Deletes a single atom which is closest to given position. Lammps doesn't have any native way to
 /// delete just one atom, only all atoms in a region, so we have to implement it ourselves using
 /// atom IDs. Unsafe when given atom count is too high.
@@ -152,14 +167,19 @@ async fn main() {
     // Hack: arbitrary values to prevent crashing, kokkos should be better but it crashes even
     // faster
     simulation.command("pair_style reaxff NULL safezone 5 mincap 300 minhbonds 300");
-    // Using CHON-2019 ReaxFF force field from Kowalik et al.
-    // https://doi.org/10.1021/acs.jpcb.9b04298
-    simulation.command(&format!(
-        "pair_coeff * * ffield.reax.chon2019 {}",
-        AtomType::iter()
-            .map(|atom_type| atom_type.symbol())
-            .join(" ")
-    ));
+    {
+        // Hack: lammps only takes reaxff force field parameters as a file path, so making a
+        // temporary file
+        let temp_path = force_field_path();
+
+        simulation.command(&format!(
+            "pair_coeff * * {} {}",
+            temp_path.display(),
+            AtomType::iter()
+                .map(|atom_type| atom_type.symbol())
+                .join(" "),
+        ));
+    }
     simulation.command("fix 2 all qeq/reaxff 1 0 10 1e-6 reaxff");
 
     // Initialize simulation control parameters
