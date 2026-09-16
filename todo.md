@@ -2,7 +2,6 @@ good first person camera
 - scroll wheel adjust movement speed??
 quantum potential
 multithreading openmp threads
-atom bar or periodic table on ui
 adjust time speed
 - maybe slider
 adjust box size

@@ -1,8 +1,8 @@
 use itertools::Itertools;
 use kiss3d::{
     camera::{Camera3d, OrbitCamera3d},
-    color::{self, Color},
-    egui::{Grid, Panel, ProgressBar, Slider},
+    color,
+    egui::{self, Align2, Button, Color32, FontId, Grid, Panel, ProgressBar, Slider},
     event::{Action, Key, MouseButton, WindowEvent},
     glamx::{DVec2, DVec3, Vec3},
     light::Light,
@@ -14,13 +14,14 @@ use parry3d::{
     query::{Ray, RayCast},
     shape::Ball,
 };
+use rgb::{ComponentMap, Rgb};
 use std::io::Write;
 use strum::{EnumIter, FromRepr, IntoEnumIterator};
 use tempfile::{NamedTempFile, TempPath};
 
 mod lammps;
 
-#[derive(Clone, Copy, FromRepr, EnumIter)]
+#[derive(Clone, Copy, PartialEq, Eq, FromRepr, EnumIter)]
 enum AtomType {
     H = 1,
     C = 2,
@@ -38,7 +39,16 @@ impl AtomType {
         };
     }
 
-    /// Mass in atomic mass units
+    fn atomic_number(self) -> u32 {
+        return match self {
+            Self::H => 1,
+            Self::C => 6,
+            Self::N => 7,
+            Self::O => 8,
+        };
+    }
+
+    /// Mass in atomic mass units, copied from the force field file
     fn mass(self) -> f64 {
         return match self {
             Self::H => 1.008,
@@ -49,14 +59,14 @@ impl AtomType {
     }
 
     /// Jmol atom colors
-    fn color(self) -> Color {
+    fn color(self) -> Rgb<u8> {
         let (r, g, b) = match self {
             Self::H => (0xFF, 0xFF, 0xFF),
             Self::C => (0x90, 0x90, 0x90),
             Self::N => (0x30, 0x50, 0xF8),
             Self::O => (0xFF, 0x0D, 0x0D),
         };
-        return Color::new(r as f32 / 256., g as f32 / 256., b as f32 / 256., 1.);
+        return Rgb::new(r, g, b);
     }
 
     /// Covalent atom radii in angstroms from Wikipedia table, times 1.5 because it looks good
@@ -328,6 +338,52 @@ async fn main() {
         let pressure = simulation.get_thermo("press");
 
         window.draw_ui(|ctx| {
+            Panel::top("top_panel").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    for atom_type in AtomType::iter() {
+                        // Make the buttons look like periodic table
+                        let Rgb { r, g, b } = atom_type.color();
+                        let background_color = Color32::from_rgb(r, g, b);
+
+                        let mut button = Button::new(())
+                            .selected(atom_type == template_atom_type)
+                            .fill(background_color)
+                            .min_size(egui::vec2(60., 60.));
+                        if atom_type == template_atom_type {
+                            button = button.stroke((3., Color32::LIGHT_GRAY));
+                        }
+
+                        let button = ui.add(button);
+
+                        let text_color = Color32::from_rgb(0x10, 0x10, 0x10);
+                        let symbol_rect = ui.painter().text(
+                            button.rect.center(),
+                            Align2::CENTER_CENTER,
+                            atom_type.symbol(),
+                            FontId::proportional(36.),
+                            text_color,
+                        );
+                        ui.painter().text(
+                            symbol_rect.center_top(),
+                            Align2::CENTER_CENTER,
+                            atom_type.atomic_number(),
+                            FontId::default(),
+                            text_color,
+                        );
+                        ui.painter().text(
+                            symbol_rect.center_bottom(),
+                            Align2::CENTER_CENTER,
+                            atom_type.mass(),
+                            FontId::default(),
+                            text_color,
+                        );
+
+                        if button.clicked() {
+                            template_atom_type = atom_type;
+                        }
+                    }
+                });
+            });
             Panel::bottom("bottom_panel").show(ctx, |ui| {
                 Grid::new("stat_grid").num_columns(2).show(ui, |ui| {
                     let mut bar_width = 0.;
@@ -449,7 +505,7 @@ async fn main() {
 
         box_cuboid.set_position(box_low.midpoint(box_high));
 
-        // Update atom positions in 3D
+        // Update atom spheres in 3D
         // Safety:
         // We always push created atoms and pop deleted atoms from atom_spheres, and lammps never
         // changes the atom count by itself, so the length of atom_spheres is also the number of
@@ -463,7 +519,7 @@ async fn main() {
             atom_sphere.set_position(DVec3::from(atom_pos).as_vec3());
             let atom_type = AtomType::from_repr(atom_type as usize)
                 .expect("lammps should not return unknown atom types");
-            atom_sphere.set_color(atom_type.color());
+            atom_sphere.set_color(atom_type.color().map(|c| c as f32 / 256.).with_alpha(1.));
             let scale = atom_type.radius() * 2.;
             atom_sphere.set_local_scale(scale, scale, scale);
         }
