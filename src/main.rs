@@ -195,7 +195,7 @@ async fn main() {
     // Initialize window
     let mut window = Window::new_with_size("Atoms", 1000, 800).await;
 
-    let mut camera = OrbitCamera3d::new(Vec3::new(0., 0., -30.), Vec3::ZERO);
+    let mut camera = OrbitCamera3d::new(Vec3::new(0., 0., -40.), Vec3::ZERO);
     camera.set_dist_step(0.995);
 
     let mut scene = SceneNode3d::empty();
@@ -269,7 +269,7 @@ async fn main() {
     template_sphere.set_lines_width(0.5, false);
 
     let mut template_add_mode = false;
-    let mut template_distance = 30.;
+    let mut template_distance = 40.;
     let mut template_atom_type = AtomType::H;
     let mut selection = Option::<Vec3>::None;
 
