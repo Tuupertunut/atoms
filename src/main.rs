@@ -126,7 +126,8 @@ fn force_field_path() -> TempPath {
 
 /// Deletes a single atom which is closest to given position. Lammps doesn't have any native way to
 /// delete just one atom, only all atoms in a region, so we have to implement it ourselves using
-/// atom IDs. Unsafe when given atom count is too high.
+/// atom IDs. This does not search for closest atoms over a periodic boundary. Unsafe when given
+/// atom count is too high.
 unsafe fn delete_closest_atom(simulation: &mut Lammps, atom_count: usize, pos: DVec3) {
     let ids = unsafe { simulation.extract_atom_id(atom_count) };
     let positions = unsafe { simulation.extract_atom_x(atom_count) };
@@ -137,6 +138,56 @@ unsafe fn delete_closest_atom(simulation: &mut Lammps, atom_count: usize, pos: D
     simulation.command(&format!("group temp id {}", closest_id));
     simulation.command("delete_atoms group temp");
     simulation.command("group temp delete");
+}
+
+/// The simulation box uses periodic boundary, which means it lives in a kind of infinite periodic
+/// space where the same box repeats over and over again. This function maps simulation coordinates
+/// to a shifted view of the box that is centered around a given center. The coordinates are allowed
+/// be outside the simulation box.
+fn sim_to_visual_pos(visual_center: Vec3, box_low: DVec3, box_high: DVec3, sim_pos: DVec3) -> Vec3 {
+    let box_center = box_low.midpoint(box_high);
+    let visual_offset = visual_center.as_dvec3() - box_center;
+    let box_size = box_high - box_low;
+
+    let box_relative_sim_pos = sim_pos - box_low;
+    // Vector distance from the sim_pos to the box_low (the lowest corner) of the visual box view
+    let visual_box_low_distance = visual_offset - box_relative_sim_pos;
+    // Ceiling the distance to the next whole number of box lengths. The distance vector will now
+    // point inside the visual box.
+    let visual_pos_distance = (visual_box_low_distance / box_size).ceil() * box_size;
+    let visual_pos = sim_pos + visual_pos_distance;
+    return visual_pos.as_vec3();
+}
+
+/// Maps coordinates from a shifted box view back to the corresponding real simulation coordinates.
+fn visual_to_sim_pos(box_low: DVec3, box_high: DVec3, visual_pos: Vec3) -> DVec3 {
+    let box_size = box_high - box_low;
+
+    let box_relative_visual_pos = visual_pos.as_dvec3() - box_low;
+    // This has to be Euclidean or flooring modulo, not truncating like %, to work with negative
+    // coordinates
+    let box_relative_sim_pos = box_relative_visual_pos.rem_euclid(box_size);
+    let sim_pos = box_relative_sim_pos + box_low;
+    return sim_pos;
+}
+
+/// Updates a visual box view center position after the box size has changed.
+fn update_visual_center(
+    old_box_low: DVec3,
+    old_box_high: DVec3,
+    new_box_low: DVec3,
+    new_box_high: DVec3,
+    old_visual_center: Vec3,
+) -> Vec3 {
+    let old_box_size = old_box_high - old_box_low;
+    let new_box_size = new_box_high - new_box_low;
+    let box_size_change_factor = new_box_size / old_box_size;
+    let box_center = new_box_low.midpoint(new_box_high);
+
+    let old_visual_offset = old_visual_center.as_dvec3() - box_center;
+    let new_visual_offset = old_visual_offset * box_size_change_factor;
+    let new_visual_center = new_visual_offset + box_center;
+    return new_visual_center.as_vec3();
 }
 
 #[kiss3d::main]
@@ -169,6 +220,9 @@ async fn main() {
         INITIAL_BOX_SIZE / 2.,
     ));
     simulation.command(&format!("create_box {} box", AtomType::iter().len()));
+
+    let mut previous_box_low = DVec3::splat(-INITIAL_BOX_SIZE / 2.);
+    let mut previous_box_high = DVec3::splat(INITIAL_BOX_SIZE / 2.);
 
     // Initialize simulation atom types and force field
     for atom_type in AtomType::iter() {
@@ -237,10 +291,14 @@ async fn main() {
                     if button1_pressed_without_dragging {
                         if template_add_mode {
                             // Add new atom
-                            let template_pos = template_sphere.position().as_dvec3().to_array();
+                            let sim_template_pos = visual_to_sim_pos(
+                                previous_box_low,
+                                previous_box_high,
+                                template_sphere.position(),
+                            );
                             simulation.create_atom(
                                 template_atom_type as i32,
-                                template_pos,
+                                sim_template_pos.to_array(),
                                 [0., 0., 0.],
                             );
                             atom_spheres.push(scene.add_sphere(0.));
@@ -249,6 +307,11 @@ async fn main() {
                         } else {
                             if let Some(selected_pos) = selection {
                                 // Delete atom
+                                let sim_selected_pos = visual_to_sim_pos(
+                                    previous_box_low,
+                                    previous_box_high,
+                                    selected_pos,
+                                );
                                 // Safety:
                                 // We always push created atoms and pop deleted atoms from
                                 // atom_spheres, and lammps never changes the atom count by itself,
@@ -258,7 +321,7 @@ async fn main() {
                                     delete_closest_atom(
                                         &mut simulation,
                                         atom_spheres.len(),
-                                        selected_pos.as_dvec3(),
+                                        sim_selected_pos,
                                     );
                                 }
                                 atom_spheres.pop().unwrap().remove();
@@ -495,15 +558,25 @@ async fn main() {
 
         // Update box position in 3D
         let (box_low, box_high) = simulation.extract_box();
-        let (box_low, box_high) = (
-            DVec3::from(box_low).as_vec3(),
-            DVec3::from(box_high).as_vec3(),
-        );
+        let (box_low, box_high) = (DVec3::from(box_low), DVec3::from(box_high));
 
-        let scale = box_high - box_low;
+        let scale = (box_high - box_low).as_vec3();
         box_cuboid.set_local_scale(scale.x, scale.y, scale.z);
 
-        box_cuboid.set_position(box_low.midpoint(box_high));
+        // Readjust camera focus point after box size has possibly changed
+        let new_camera_focus = update_visual_center(
+            previous_box_low,
+            previous_box_high,
+            box_low,
+            box_high,
+            camera.at(),
+        );
+        camera.set_at(new_camera_focus);
+
+        // Box visual position is always centered on the camera focus
+        box_cuboid.set_position(camera.at());
+
+        (previous_box_low, previous_box_high) = (box_low, box_high);
 
         // Update atom spheres in 3D
         // Safety:
@@ -516,12 +589,15 @@ async fn main() {
         for (atom_sphere, (atom_pos, atom_type)) in
             atom_spheres.iter_mut().zip(positions.zip(types))
         {
-            atom_sphere.set_position(DVec3::from(atom_pos).as_vec3());
             let atom_type = AtomType::from_repr(atom_type as usize)
                 .expect("lammps should not return unknown atom types");
             atom_sphere.set_color(atom_type.color().map(|c| c as f32 / 256.).with_alpha(1.));
             let scale = atom_type.radius() * 2.;
             atom_sphere.set_local_scale(scale, scale, scale);
+
+            let visual_atom_pos =
+                sim_to_visual_pos(camera.at(), box_low, box_high, DVec3::from(atom_pos));
+            atom_sphere.set_position(visual_atom_pos);
         }
 
         // Update template sphere in 3D
