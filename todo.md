@@ -1,7 +1,7 @@
 fix lammps crashes
 - kokkos should help with this, but it crashes even faster
-half the scroll speed
 multithreading openmp threads
+translate box in forward/backward direction too
 ui legend
 adjust time speed
 - maybe slider

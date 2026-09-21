@@ -196,7 +196,7 @@ async fn main() {
     let mut window = Window::new_with_size("Atoms", 1000, 800).await;
 
     let mut camera = OrbitCamera3d::new(Vec3::new(0., 0., -30.), Vec3::ZERO);
-    camera.set_dist_step(0.99);
+    camera.set_dist_step(0.995);
 
     let mut scene = SceneNode3d::empty();
     let mut light = scene.add_light(Light::default());
@@ -343,7 +343,7 @@ async fn main() {
                 WindowEvent::Scroll(_, y_offset, _) if !window.is_egui_capturing_mouse() => {
                     if template_add_mode {
                         event.inhibited = true;
-                        template_distance *= f32::powf(1.01, y_offset as f32);
+                        template_distance *= f32::powf(1.005, y_offset as f32);
                     }
                 }
                 WindowEvent::Key(Key::Space, Action::Press, _)
