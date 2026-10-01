@@ -202,7 +202,7 @@ async fn main() {
     let mut light = scene.add_light(Light::default());
 
     // Initialize simulation
-    let mut simulation = Lammps::open(&["-log", "none", "-kokkos", "on", "-suffix", "kk"]);
+    let mut simulation = Lammps::open(&["-log", "none", "-kokkos", "on", "threads", "4", "-suffix", "kk"]);
     simulation.command("units real");
     simulation.command("dimension 3");
     simulation.command("boundary p p p");

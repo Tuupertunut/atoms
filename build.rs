@@ -4,7 +4,7 @@ fn main() {
     // Build lammps with cmake
     let lammps_build_dir = cmake::Config::new("lammps/cmake")
         .define("BUILD_MPI", "no")
-        .define("BUILD_OMP", "no")
+        .define("BUILD_OMP", "yes")
         .define("WITH_JPEG", "no")
         .define("WITH_PNG", "no")
         .define("WITH_FFMPEG", "no")
@@ -13,6 +13,7 @@ fn main() {
         .define("WITH_CURL", "no")
         .define("PKG_REAXFF", "yes")
         .define("PKG_KOKKOS", "yes")
+        .define("Kokkos_ENABLE_OPENMP", "yes")
         .build();
 
     // Tell cargo to look for libraries in the specified directory
@@ -34,6 +35,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=lammps");
     println!("cargo:rustc-link-lib=static=kokkoscore");
     println!("cargo:rustc-link-lib=static=kokkoscontainers");
+    println!("cargo:rustc-link-lib=static=gomp");
     println!("cargo:rustc-link-lib=static=stdc++");
 
     // The bindgen::Builder is the main entry point
