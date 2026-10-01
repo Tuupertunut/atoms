@@ -202,7 +202,7 @@ async fn main() {
     let mut light = scene.add_light(Light::default());
 
     // Initialize simulation
-    let mut simulation = Lammps::open(&["-log", "none"]);
+    let mut simulation = Lammps::open(&["-log", "none", "-kokkos", "on", "-suffix", "kk"]);
     simulation.command("units real");
     simulation.command("dimension 3");
     simulation.command("boundary p p p");
@@ -228,9 +228,7 @@ async fn main() {
     for atom_type in AtomType::iter() {
         simulation.command(&format!("mass {} {}", atom_type as i32, atom_type.mass()));
     }
-    // Hack: arbitrary values to prevent crashing, kokkos should be better but it crashes even
-    // faster
-    simulation.command("pair_style reaxff NULL safezone 5 mincap 300 minhbonds 300");
+    simulation.command("pair_style reaxff NULL");
     {
         // Hack: lammps only takes reaxff force field parameters as a file path, so making a
         // temporary file

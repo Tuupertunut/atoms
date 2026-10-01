@@ -12,6 +12,7 @@ fn main() {
         .define("WITH_ZLIB", "no")
         .define("WITH_CURL", "no")
         .define("PKG_REAXFF", "yes")
+        .define("PKG_KOKKOS", "yes")
         .build();
 
     // Tell cargo to look for libraries in the specified directory
@@ -19,10 +20,20 @@ fn main() {
         "cargo:rustc-link-search={}",
         lammps_build_dir.join("build").display()
     );
+    println!(
+        "cargo:rustc-link-search={}",
+        lammps_build_dir.join("build/lib/kokkos/core/src").display()
+    );
+    println!(
+        "cargo:rustc-link-search={}",
+        lammps_build_dir.join("build/lib/kokkos/containers/src").display()
+    );
 
     // Tell cargo to tell rustc to link the `lammps` library. Cargo will
     // automatically know it must look for a `liblammps.a` file.
     println!("cargo:rustc-link-lib=static=lammps");
+    println!("cargo:rustc-link-lib=static=kokkoscore");
+    println!("cargo:rustc-link-lib=static=kokkoscontainers");
     println!("cargo:rustc-link-lib=static=stdc++");
 
     // The bindgen::Builder is the main entry point
