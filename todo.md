@@ -1,6 +1,3 @@
-fix lammps crashes
-- kokkos should help with this, but it crashes even faster
-multithreading openmp threads
 translate box in forward/backward direction too
 ui legend
 adjust time speed
@@ -10,6 +7,7 @@ adjust box size
 - related to barostat
 set initial velocity for atom
 - maybe set velocity also when running
+run ui and simulation in separate threads
 clean slider ui
 - show measurement bars over slider limit
 investigate if order of operations in main loop could be changed to more logical
