@@ -552,7 +552,7 @@ async fn main() {
         }
 
         // Run simulation one frame forward
-        if simulation_running {
+        if simulation_running && !atom_spheres.is_empty() {
             simulation.command(&format!("run {}", STEPS_PER_FRAME));
         }
 
