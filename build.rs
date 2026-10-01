@@ -9,6 +9,7 @@ fn main() {
         .define("WITH_PNG", "no")
         .define("WITH_FFMPEG", "no")
         .define("WITH_GZIP", "no")
+        .define("WITH_ZLIB", "no")
         .define("WITH_CURL", "no")
         .define("PKG_REAXFF", "yes")
         .build();
